@@ -6,17 +6,23 @@
 
 A modular package for evaluating foundation model performance on various clinical tasks involving cardiac MRI and CT images.
 
-## Installation
+## Installation (uv)
+
+Install uv (https://astral.sh/uv) and then:
 
 ```bash
-python -m pip install heartfm_evals
+uv venv .venv
+source .venv/bin/activate
+uv pip install -e .
 ```
 
 From source:
 ```bash
 git clone https://github.com/alan-turing-institute/heartfm-evals
 cd heartfm-evals
-python -m pip install .
+uv venv .venv
+source .venv/bin/activate
+uv pip install -e .
 ```
 
 ## Usage
