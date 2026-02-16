@@ -7,10 +7,11 @@ name = "heartfm-evals"
 version = "0.1.0"
 authors = [
   { name = "Levan Bokeria", email = "lbokeria@turing.ac.uk" },
+  { name = "Camila Rangel-Smith", email = "crangelsmith@turing.ac.uk" }
 ]
 description = "A modular package for evaluating foundation model performance on various clinical tasks involving cardiac MRI and CT images."
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 classifiers = [
   "Development Status :: 1 - Planning",
   "Intended Audience :: Science/Research",
@@ -20,19 +21,38 @@ classifiers = [
   "Programming Language :: Python",
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3 :: Only",
-  "Programming Language :: Python :: 3.9",
-  "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
   "Topic :: Scientific/Engineering",
 ]
-dependencies = []
+dependencies = [
+    "torch",
+    "torchvision",
+    "numpy",
+    "pandas",
+    "tqdm",
+    "nibabel",
+    "SimpleITK",
+    "monai",
+    "Pyyaml",
+    "matplotlib",
+    "hydra-core",
+    "omegaconf",
+    "safetensors",
+    "timm",
+    "einops",
+    "CineMA @ git+https://github.com/alan-turing-institute/CineMA",
+    "tensorboard",
+    "wandb"
+]
 
 [project.optional-dependencies]
 dev = [
   "pytest >=6",
   "pytest-cov >=3",
   "pre-commit",
+  "black",
 ]
 
 [project.urls]
@@ -102,3 +122,6 @@ unfixable = [
   "F841",   # Would remove unused variables
 ]
 flake8-unused-arguments.ignore-variadic-names = true  # allow unused *args/**kwargs
+
+[tool.hatch.metadata]
+allow-direct-references = true
