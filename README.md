@@ -32,9 +32,12 @@ uv pip install -e .
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for instructions on how to contribute.
 
-## License
+## Licensing
 
-Distributed under the terms of the [MIT license](LICENSE).
+This repository contains code under multiple licenses:
+
+- Original code: MIT License (see LICENSE)
+- DINOv3 models and materials: DINOv3 License (see LICENSE-DINOv3.md)
 
 
 <!-- prettier-ignore-start -->
