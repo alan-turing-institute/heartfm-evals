@@ -158,6 +158,7 @@ Thumbs.db
 *.swp
 
 #Models directory
-models/
+# models/
+model_weights/
 
 .vscode/
