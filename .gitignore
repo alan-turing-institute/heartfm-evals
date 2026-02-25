@@ -162,3 +162,5 @@ Thumbs.db
 model_weights/
 
 .vscode/
+
+notebooks/images/
