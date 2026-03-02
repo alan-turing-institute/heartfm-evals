@@ -46,7 +46,8 @@ dependencies = [
     "tensorboard",
     "wandb",
     "dinov3 @ git+https://github.com/facebookresearch/dinov3/",
-    "ipykernel"
+    "ipykernel",
+    "transformers"
 ]
 
 [project.optional-dependencies]
