@@ -160,6 +160,7 @@ Thumbs.db
 #Models directory
 # models/
 model_weights/
+feature_cache/
 
 .vscode/
 
