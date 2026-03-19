@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import logging
 from collections import defaultdict
+from pathlib import Path
 
 import numpy as np
 import torch
@@ -88,6 +89,107 @@ def extract_cls_features(
             patient_features[pid][frame_key].append(cls_token)
 
     # Stack per-patient features into tensors
+    result: dict[str, dict] = {}
+    for pid, frames in patient_features.items():
+        result[pid] = {
+            "ed_features": torch.stack(frames["ed"])
+            if frames["ed"]
+            else torch.empty(0),
+            "es_features": torch.stack(frames["es"])
+            if frames["es"]
+            else torch.empty(0),
+        }
+
+    return result
+
+
+# ── Feature Caching ────────────────────────────────────────────────────────────
+@torch.inference_mode()
+def cache_cls_features(
+    backbone: nn.Module,
+    cinema_dataset,
+    cache_dir: Path,
+    device: torch.device | None = None,
+) -> list[dict]:
+    """Extract and cache final-layer CLS tokens to disk, one .pt file per slice.
+
+    Saves ``{"cls_token": Tensor(embed_dim,)}`` per file.  Skips files that
+    already exist so the function is safe to re-run.
+
+    Args:
+        backbone: Frozen DINOv3 backbone in eval mode.
+        cinema_dataset: CineMA EndDiastoleEndSystoleDataset.
+        cache_dir: Directory to save cached CLS tokens.
+        device: Device for inference.
+
+    Returns:
+        Manifest — list of dicts with keys: path, pid, is_ed, z_idx.
+    """
+    cache_dir = Path(cache_dir)
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    manifest: list[dict] = []
+
+    for sample_idx in tqdm(
+        range(len(cinema_dataset)), desc="Caching CLS features"
+    ):
+        sample = cinema_dataset[sample_idx]
+        image_3d = sample["sax_image"]  # (1, H, W, z)
+        n_slices = sample["n_slices"]
+        pid = sample["pid"]
+        is_ed = sample["is_ed"]
+        frame = "ed" if is_ed else "es"
+
+        for z in range(n_slices):
+            fname = f"{pid}_{frame}_z{z:02d}.pt"
+            fpath = cache_dir / fname
+
+            if fpath.exists():
+                manifest.append(
+                    {"path": fpath, "pid": pid, "is_ed": is_ed, "z_idx": z}
+                )
+                continue
+
+            image_2d = image_3d[0, :, :, z]  # (H, W) in [0, 1]
+            img = preprocess_slice(image_2d)  # (1, 3, H, W)
+            if device is not None:
+                img = img.to(device)
+
+            feats = backbone.get_intermediate_layers(
+                img, n=1, return_class_token=True, norm=True
+            )
+            cls_token = feats[0][1].squeeze(0).cpu()  # (embed_dim,)
+
+            torch.save({"cls_token": cls_token}, fpath)
+            manifest.append(
+                {"path": fpath, "pid": pid, "is_ed": is_ed, "z_idx": z}
+            )
+
+    return manifest
+
+
+def load_cached_cls_features(
+    manifest: list[dict],
+) -> dict[str, dict]:
+    """Load cached CLS tokens from disk and group by patient.
+
+    Args:
+        manifest: Output of :func:`cache_cls_features`.
+
+    Returns:
+        Dict keyed by patient ID, each containing:
+            - "ed_features": Tensor (n_ed_slices, embed_dim)
+            - "es_features": Tensor (n_es_slices, embed_dim)
+        Same structure as :func:`extract_cls_features`.
+    """
+    patient_features: dict[str, dict[str, list[torch.Tensor]]] = defaultdict(
+        lambda: {"ed": [], "es": []}
+    )
+
+    for entry in manifest:
+        data = torch.load(entry["path"], weights_only=True)
+        frame_key = "ed" if entry["is_ed"] else "es"
+        patient_features[entry["pid"]][frame_key].append(data["cls_token"])
+
     result: dict[str, dict] = {}
     for pid, frames in patient_features.items():
         result[pid] = {
