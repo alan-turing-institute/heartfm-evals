@@ -35,6 +35,13 @@ logger = logging.getLogger(__name__)
 # ── Constants ──────────────────────────────────────────────────────────────────
 PATHOLOGY_CLASSES = {"NOR": 0, "DCM": 1, "HCM": 2, "MINF": 3, "RV": 4}
 PATHOLOGY_NAMES = {v: k for k, v in PATHOLOGY_CLASSES.items()}
+PATHOLOGY_NAMES_LONG = {
+    "NOR": "Normal",
+    "DCM": "Dilated Cardiomyopathy",
+    "HCM": "Hypertrophic Cardiomyopathy",
+    "MINF": "Myocardial Infarction",
+    "RV": "Abnormal Right Ventricle",
+}
 NUM_PATHOLOGIES = len(PATHOLOGY_CLASSES)
 
 # Same sweep range as dinov3 eval/log_regression.py
@@ -129,9 +136,7 @@ def cache_cls_features(
     cache_dir.mkdir(parents=True, exist_ok=True)
     manifest: list[dict] = []
 
-    for sample_idx in tqdm(
-        range(len(cinema_dataset)), desc="Caching CLS features"
-    ):
+    for sample_idx in tqdm(range(len(cinema_dataset)), desc="Caching CLS features"):
         sample = cinema_dataset[sample_idx]
         image_3d = sample["sax_image"]  # (1, H, W, z)
         n_slices = sample["n_slices"]
@@ -144,9 +149,7 @@ def cache_cls_features(
             fpath = cache_dir / fname
 
             if fpath.exists():
-                manifest.append(
-                    {"path": fpath, "pid": pid, "is_ed": is_ed, "z_idx": z}
-                )
+                manifest.append({"path": fpath, "pid": pid, "is_ed": is_ed, "z_idx": z})
                 continue
 
             image_2d = image_3d[0, :, :, z]  # (H, W) in [0, 1]
@@ -160,9 +163,7 @@ def cache_cls_features(
             cls_token = feats[0][1].squeeze(0).cpu()  # (embed_dim,)
 
             torch.save({"cls_token": cls_token}, fpath)
-            manifest.append(
-                {"path": fpath, "pid": pid, "is_ed": is_ed, "z_idx": z}
-            )
+            manifest.append({"path": fpath, "pid": pid, "is_ed": is_ed, "z_idx": z})
 
     return manifest
 
@@ -329,8 +330,10 @@ def evaluate_classification(
     """Evaluate a fitted logistic regression model.
 
     Returns:
-        Dict with keys: accuracy, per_class_accuracy, confusion_matrix,
-        classification_report, predictions, probabilities.
+        Dict with keys: accuracy, macro_f1, per_class_accuracy,
+        per_class_sensitivity, per_class_specificity, macro_sensitivity,
+        macro_specificity, confusion_matrix, classification_report,
+        predictions, probabilities.
     """
     X = features.numpy()
     y_true = labels.numpy()
@@ -340,14 +343,38 @@ def evaluate_classification(
 
     acc = accuracy_score(y_true, y_pred)
 
-    # Per-class accuracy
-    per_class_acc = {}
+    cm = confusion_matrix(y_true, y_pred, labels=list(range(NUM_PATHOLOGIES)))
+
+    # Per-class accuracy, sensitivity (TPR), and specificity (TNR)
+    per_class_acc: dict[str, float] = {}
+    per_class_sensitivity: dict[str, float] = {}
+    per_class_specificity: dict[str, float] = {}
+    total = cm.sum()
+
     for cls_name, cls_idx in PATHOLOGY_CLASSES.items():
+        tp = cm[cls_idx, cls_idx]
+        fn = cm[cls_idx, :].sum() - tp
+        fp = cm[:, cls_idx].sum() - tp
+        tn = total - tp - fn - fp
+
         mask = y_true == cls_idx
         if mask.sum() > 0:
-            per_class_acc[cls_name] = accuracy_score(y_true[mask], y_pred[mask])
+            per_class_acc[cls_name] = float(accuracy_score(y_true[mask], y_pred[mask]))
 
-    cm = confusion_matrix(y_true, y_pred, labels=list(range(NUM_PATHOLOGIES)))
+        per_class_sensitivity[cls_name] = (
+            float(tp / (tp + fn)) if (tp + fn) > 0 else 0.0
+        )
+        per_class_specificity[cls_name] = (
+            float(tn / (tn + fp)) if (tn + fp) > 0 else 0.0
+        )
+
+    macro_sensitivity = float(
+        sum(per_class_sensitivity.values()) / len(per_class_sensitivity)
+    )
+    macro_specificity = float(
+        sum(per_class_specificity.values()) / len(per_class_specificity)
+    )
+
     report = classification_report(
         y_true,
         y_pred,
@@ -360,7 +387,11 @@ def evaluate_classification(
     return {
         "accuracy": acc,
         "macro_f1": macro_f1,
+        "macro_sensitivity": macro_sensitivity,
+        "macro_specificity": macro_specificity,
         "per_class_accuracy": per_class_acc,
+        "per_class_sensitivity": per_class_sensitivity,
+        "per_class_specificity": per_class_specificity,
         "confusion_matrix": cm,
         "classification_report": report,
         "predictions": y_pred,
