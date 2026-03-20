@@ -418,7 +418,9 @@ def evaluate_linear_classification(
 
     Returns:
         Dict with keys: accuracy, macro_f1, per_class_accuracy,
-        confusion_matrix, classification_report, predictions, probabilities.
+        per_class_sensitivity, per_class_specificity, macro_sensitivity,
+        macro_specificity, confusion_matrix, classification_report,
+        predictions, probabilities.
     """
     if device is None:
         device = torch.device("cpu")
@@ -432,13 +434,38 @@ def evaluate_linear_classification(
 
     acc = accuracy_score(y_true, y_pred)
 
+    cm = confusion_matrix(y_true, y_pred, labels=list(range(NUM_PATHOLOGIES)))
+
+    # Per-class accuracy, sensitivity (TPR), and specificity (TNR)
     per_class_acc: dict[str, float] = {}
+    per_class_sensitivity: dict[str, float] = {}
+    per_class_specificity: dict[str, float] = {}
+    total = cm.sum()
+
     for cls_name, cls_idx in PATHOLOGY_CLASSES.items():
+        tp = cm[cls_idx, cls_idx]
+        fn = cm[cls_idx, :].sum() - tp
+        fp = cm[:, cls_idx].sum() - tp
+        tn = total - tp - fn - fp
+
         mask = y_true == cls_idx
         if mask.sum() > 0:
             per_class_acc[cls_name] = float(accuracy_score(y_true[mask], y_pred[mask]))
 
-    cm = confusion_matrix(y_true, y_pred, labels=list(range(NUM_PATHOLOGIES)))
+        per_class_sensitivity[cls_name] = (
+            float(tp / (tp + fn)) if (tp + fn) > 0 else 0.0
+        )
+        per_class_specificity[cls_name] = (
+            float(tn / (tn + fp)) if (tn + fp) > 0 else 0.0
+        )
+
+    macro_sensitivity = float(
+        sum(per_class_sensitivity.values()) / len(per_class_sensitivity)
+    )
+    macro_specificity = float(
+        sum(per_class_specificity.values()) / len(per_class_specificity)
+    )
+
     report = classification_report(
         y_true,
         y_pred,
@@ -451,7 +478,11 @@ def evaluate_linear_classification(
     return {
         "accuracy": acc,
         "macro_f1": macro_f1,
+        "macro_sensitivity": macro_sensitivity,
+        "macro_specificity": macro_specificity,
         "per_class_accuracy": per_class_acc,
+        "per_class_sensitivity": per_class_sensitivity,
+        "per_class_specificity": per_class_specificity,
         "confusion_matrix": cm,
         "classification_report": report,
         "predictions": y_pred,
