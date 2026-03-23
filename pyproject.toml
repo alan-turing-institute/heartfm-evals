@@ -29,7 +29,7 @@ classifiers = [
 dependencies = [
     "torch",
     "torchvision",
-    "numpy",
+    "numpy<2",
     "pandas",
     "tqdm",
     "nibabel",
@@ -46,7 +46,8 @@ dependencies = [
     "tensorboard",
     "wandb",
     "dinov3 @ git+https://github.com/facebookresearch/dinov3/",
-    "ipykernel"
+    "ipykernel",
+    "transformers"
 ]
 
 [project.optional-dependencies]
@@ -127,3 +128,11 @@ flake8-unused-arguments.ignore-variadic-names = true  # allow unused *args/**kwa
 
 [tool.hatch.metadata]
 allow-direct-references = true
+
+[tool.uv]
+required-environments = [
+    "sys_platform == 'darwin' and platform_machine == 'arm64'",
+]
+
+
+
