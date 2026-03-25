@@ -167,3 +167,4 @@ linear_feature_cache/
 .vscode/
 
 notebooks/images/
+data/heartfm/processed/acdc/*
