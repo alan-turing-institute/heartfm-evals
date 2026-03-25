@@ -275,36 +275,42 @@ class ACDCSliceDataset(Dataset):
     """Wraps a CineMA EndDiastoleEndSystoleDataset to yield individual 2D slices.
 
     Each item is a dict with keys: image (3, H, W), label (H, W), pid.
+
+    Uses lazy indexing: only a lightweight (sample_idx, z, pid) index list is
+    built at construction time; the actual volume tensors are loaded on demand
+    inside ``__getitem__``.
     """
 
     def __init__(self, cinema_dataset, augment: bool = False):
-        self.items: list[dict] = []
+        self.cinema_dataset = cinema_dataset
+        # Lightweight index: list of (sample_idx, z, pid, is_ed)
+        self.index: list[tuple[int, int, str, bool]] = []
         for sample_idx in range(len(cinema_dataset)):
             sample = cinema_dataset[sample_idx]
-            image_3d = sample["sax_image"]  # (1, H, W, z)
-            label_3d = sample["sax_label"]
             n_slices = sample["n_slices"]
             pid = sample["pid"]
             is_ed = sample["is_ed"]
             for z in range(n_slices):
-                self.items.append(
-                    {
-                        "image_3d": image_3d,
-                        "label_3d": label_3d,
-                        "z": z,
-                        "pid": pid,
-                        "is_ed": is_ed,
-                    }
-                )
+                self.index.append((sample_idx, z, pid, is_ed))
         self.augment = augment
+        self._cache_key: int | None = None
+        self._cache_value: dict | None = None
 
     def __len__(self) -> int:
-        return len(self.items)
+        return len(self.index)
+
+    def _load_sample(self, sample_idx: int) -> dict:
+        """Load a volume sample, reusing the cached result when possible."""
+        if self._cache_key != sample_idx:
+            self._cache_key = sample_idx
+            self._cache_value = self.cinema_dataset[sample_idx]
+        return self._cache_value
 
     def __getitem__(self, idx: int) -> dict:
-        item = self.items[idx]
-        image_2d = item["image_3d"][0, :, :, item["z"]]  # (H, W) in [0,1]
-        label_2d = item["label_3d"][0, :, :, item["z"]]  # (H, W)
+        sample_idx, z, pid, _ = self.index[idx]
+        sample = self._load_sample(sample_idx)
+        image_2d = sample["sax_image"][0, :, :, z]  # (H, W) in [0,1]
+        label_2d = sample["sax_label"][0, :, :, z]  # (H, W)
 
         # Repeat to 3 channels + ImageNet normalize
         img = image_2d.unsqueeze(0).repeat(3, 1, 1)  # (3, H, W)
@@ -316,7 +322,7 @@ class ACDCSliceDataset(Dataset):
                 img = img.flip(-1)
                 label_2d = label_2d.flip(-1)
 
-        return {"image": img, "label": label_2d.long(), "pid": item["pid"]}
+        return {"image": img, "label": label_2d.long(), "pid": pid}
 
 
 # ── Training Utilities ─────────────────────────────────────────────────────────
