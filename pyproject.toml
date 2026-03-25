@@ -29,7 +29,7 @@ classifiers = [
 dependencies = [
     "torch",
     "torchvision",
-    "numpy",
+    "numpy<2",
     "pandas",
     "tqdm",
     "nibabel",
@@ -47,8 +47,12 @@ dependencies = [
     "wandb",
     "dinov3 @ git+https://github.com/facebookresearch/dinov3/",
     "ipykernel",
+<<<<<<< classification-baselines
     "transformers",
     "seaborn>=0.13.2",
+=======
+    "transformers"
+>>>>>>> main
 ]
 
 [project.optional-dependencies]
