@@ -29,7 +29,6 @@ from heartfm_evals.classification_probe import (
     CINEMA_SAX_TARGET_DEPTH,
     NUM_PATHOLOGIES,
     PATHOLOGY_CLASSES,
-    _extract_cinema_per_slice_tokens,
 )
 from heartfm_evals.dense_linear_probe import preprocess_slice
 
@@ -86,13 +85,14 @@ def _extract_patient_feature_cinema(
     sample: dict,
     device: torch.device,
 ) -> torch.Tensor:
-    """Extract (embed_dim,) per-frame feature from CineMA backbone (differentiable)."""
+    """Extract (embed_dim,) per-frame feature from CineMA backbone (differentiable).
+
+    Global-mean-pools all spatial tokens from the 3D volume into a single vector.
+    """
     image_3d = sample["sax_image"]  # (1, H, W, z)
-    n_slices = int(sample["n_slices"])
 
     vol = image_3d
     z = int(vol.shape[-1])
-    used_depth = min(z, CINEMA_SAX_TARGET_DEPTH)
 
     if z > CINEMA_SAX_TARGET_DEPTH:
         vol = vol[..., :CINEMA_SAX_TARGET_DEPTH]
@@ -102,17 +102,7 @@ def _extract_patient_feature_cinema(
     batch = {"sax": vol.unsqueeze(0).to(device=device, dtype=torch.float32)}
     tokens = backbone.feature_forward(batch)["sax"]  # (1, n_tokens, C)
 
-    gx, gy, gz = backbone.enc_down_dict["sax"].patch_embed.grid_size
-    token_grid = tokens.squeeze(0).reshape(gx, gy, gz, -1)
-
-    per_slice = []
-    for z_idx in range(n_slices):
-        src_z = min(z_idx, max(used_depth - 1, 0))
-        feat_z = int(round(src_z * (gz - 1) / max(used_depth - 1, 1)))
-        slice_token = token_grid[:, :, feat_z, :].mean(dim=(0, 1))
-        per_slice.append(slice_token)
-
-    return torch.stack(per_slice).mean(dim=0)  # (embed_dim,)
+    return tokens.squeeze(0).mean(dim=0)  # (embed_dim,)
 
 
 def _extract_patient_feature_sam(
@@ -623,20 +613,23 @@ def finetune_sweep_and_train(
 
     if freeze_backbone:
         # Frozen: retrain head on cached features (fast)
+        # Train for the full epoch budget — no checkpoint selection needed
+        # since there is no held-out validation split.
         all_idx = np.arange(len(all_patients))
         head = ClassificationHead(in_dim).to(device)
-        _, best_head_state = _train_with_lr_cached(
+        _train_with_lr_cached(
             head, cached_features, cached_labels,
             all_idx, all_idx,
             lr=best_lr, weight_decay=weight_decay,
             epochs=epochs, patience=epochs, device=device,
             scaler=final_scaler,
         )
-        head.load_state_dict(best_head_state)
     else:
-        # Unfrozen: single end-to-end fine-tuning run with backbone + head
+        # Unfrozen: single end-to-end fine-tuning run with backbone + head.
+        # Train for the full epoch budget — no checkpoint selection needed
+        # since there is no held-out validation split.
         head = ClassificationHead(in_dim).to(device)
-        _, best_backbone_state, best_head_state = _train_with_lr(
+        _train_with_lr(
             backbone, head, cinema_dataset,
             all_patients, all_patients,
             lr=best_lr, weight_decay=weight_decay,
@@ -645,8 +638,6 @@ def finetune_sweep_and_train(
             freeze_backbone=False,
             image_processor=image_processor,
         )
-        backbone.load_state_dict(best_backbone_state)
-        head.load_state_dict(best_head_state)
 
     return best_lr, backbone, head, sweep_results
 
@@ -664,7 +655,7 @@ def evaluate_finetune_classification(
     """Evaluate a fine-tuned backbone+head on a dataset.
 
     Returns the same metric dict as classification_probe.evaluate_classification():
-        accuracy, macro_f1, per_class_accuracy, per_class_sensitivity,
+        accuracy, macro_f1, per_class_sensitivity,
         per_class_specificity, macro_sensitivity, macro_specificity,
         confusion_matrix, classification_report, predictions, probabilities.
     """
@@ -707,7 +698,6 @@ def evaluate_finetune_classification(
     acc = accuracy_score(y_true, y_pred)
     cm = confusion_matrix(y_true, y_pred, labels=list(range(NUM_PATHOLOGIES)))
 
-    per_class_acc: dict[str, float] = {}
     per_class_sensitivity: dict[str, float] = {}
     per_class_specificity: dict[str, float] = {}
     total = cm.sum()
@@ -717,10 +707,6 @@ def evaluate_finetune_classification(
         fn = cm[cls_idx, :].sum() - tp
         fp = cm[:, cls_idx].sum() - tp
         tn = total - tp - fn - fp
-
-        mask = y_true == cls_idx
-        if mask.sum() > 0:
-            per_class_acc[cls_name] = float(accuracy_score(y_true[mask], y_pred[mask]))
 
         per_class_sensitivity[cls_name] = (
             float(tp / (tp + fn)) if (tp + fn) > 0 else 0.0
@@ -752,7 +738,6 @@ def evaluate_finetune_classification(
         "macro_f1": macro_f1,
         "macro_sensitivity": macro_sensitivity,
         "macro_specificity": macro_specificity,
-        "per_class_accuracy": per_class_acc,
         "per_class_sensitivity": per_class_sensitivity,
         "per_class_specificity": per_class_specificity,
         "confusion_matrix": cm,

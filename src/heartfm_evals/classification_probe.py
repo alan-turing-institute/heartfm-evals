@@ -4,19 +4,19 @@ Supports three frozen backbones with a shared downstream protocol:
 
     1. **DINOv3**: extract final-layer CLS token per 2D slice →
        one ``(embed_dim,)`` embedding per slice.
-    2. **CineMA**: run ``feature_forward()`` on the 3D SAX volume, reshape
-       tokens to the spatial grid ``(gx, gy, gz)``, and mean-pool the
-       ``(gx, gy)`` spatial tokens at each depth index → one ``(embed_dim,)``
-       embedding per slice.
+    2. **CineMA**: run ``feature_forward()`` on the 3D SAX volume and
+       global-mean-pool all ``(gx*gy*gz)`` spatial tokens → one
+       ``(embed_dim,)`` embedding per cardiac-phase volume.
 
     3. **SAM**: run ``get_image_embeddings()`` on each 2D slice (converted to
        RGB via ``SamImageProcessor``), global-average-pool the spatial feature
        map ``(C, h, w)`` → one ``(C,)`` embedding per slice.
 
-All three backbones therefore produce one embedding per 2D slice.  Patient-level
-features are built identically: mean-pool ED slice embeddings, mean-pool ES
-slice embeddings, concatenate → ``(2 × embed_dim,)`` vector → sklearn
-LogisticRegression with L2 penalty and C-sweep via stratified CV.
+DINOv3 and SAM produce one embedding per 2D slice; CineMA produces one
+embedding per 3D volume.  Patient-level features are built identically:
+mean-pool ED embeddings, mean-pool ES embeddings, concatenate →
+``(2 × embed_dim,)`` vector → sklearn LogisticRegression with L2 penalty
+and C-sweep via stratified CV.
 """
 
 from __future__ import annotations
@@ -225,44 +225,34 @@ CINEMA_SAX_TARGET_DEPTH = 16
 
 
 @torch.inference_mode()
-def _extract_cinema_per_slice_tokens(
+def _extract_cinema_volume_token(
     backbone: nn.Module,
     sax_volume: torch.Tensor,
-    n_slices: int,
     device: torch.device | None = None,
     target_depth: int = CINEMA_SAX_TARGET_DEPTH,
-) -> list[torch.Tensor]:
-    """Run CineMA on one SAX volume and return a mean-pooled token per slice.
+) -> torch.Tensor:
+    """Run CineMA on one SAX volume and return a single global-mean-pooled token.
 
-    To ensure a fair comparison with DINOv3 (which extracts one CLS token per
-    2D slice), we decompose CineMA's 3D token grid into per-slice groups and
-    mean-pool each group independently.  This produces one ``(embed_dim,)``
-    vector per original slice — analogous to a CLS token — so the downstream
-    patient-level pooling (mean ED slices ⊕ mean ES slices) is identical for
-    both backbones.
+    Following the CineMA paper, we mean-pool **all** spatial tokens from the 3D
+    token grid into a single ``(embed_dim,)`` vector per cardiac-phase volume.
 
     Steps:
         1. Pad/truncate the volume depth to ``target_depth`` (CineMA's expected
            SAX depth).
         2. Run ``backbone.feature_forward()`` → ``(1, gx*gy*gz, C)`` tokens.
-        3. Reshape tokens to the spatial grid ``(gx, gy, gz, C)``.
-        4. For each original slice ``z_idx`` (0 … n_slices-1), find the nearest
-           depth-axis index in the token grid and mean-pool the ``(gx, gy, C)``
-           spatial tokens at that depth → ``(C,)`` per-slice embedding.
+        3. Mean-pool across the token dimension → ``(C,)`` embedding.
 
     Args:
         backbone: Frozen CineMA backbone in eval mode.
         sax_volume: ``(1, H, W, z)`` tensor in [0, 1].
-        n_slices: Number of real (non-padded) slices in the volume.
         device: Device for inference.
         target_depth: Expected SAX depth for CineMA (default 16).
 
     Returns:
-        List of ``n_slices`` tensors, each of shape ``(embed_dim,)`` on CPU.
+        Single tensor of shape ``(embed_dim,)`` on CPU.
     """
     vol = sax_volume
     z = int(vol.shape[-1])
-    used_depth = min(z, target_depth)
 
     if z > target_depth:
         vol = vol[..., :target_depth]
@@ -273,20 +263,8 @@ def _extract_cinema_per_slice_tokens(
     batch = {"sax": vol.unsqueeze(0).to(device=device, dtype=torch.float32)}
     tokens = backbone.feature_forward(batch)["sax"]  # (1, n_tokens, C)
 
-    # Reshape to spatial grid (gx, gy, gz, C)
-    gx, gy, gz = backbone.enc_down_dict["sax"].patch_embed.grid_size
-    token_grid = tokens.squeeze(0).reshape(gx, gy, gz, -1)  # (gx, gy, gz, C)
-
-    # Map each original slice to its nearest depth index in the token grid,
-    # then mean-pool the (gx * gy) spatial tokens at that depth.
-    per_slice_tokens = []
-    for z_idx in range(n_slices):
-        src_z = min(z_idx, max(used_depth - 1, 0))
-        feat_z = int(round(src_z * (gz - 1) / max(used_depth - 1, 1)))
-        slice_token = token_grid[:, :, feat_z, :].mean(dim=(0, 1)).cpu()  # (C,)
-        per_slice_tokens.append(slice_token)
-
-    return per_slice_tokens
+    # Global mean-pool across all spatial tokens
+    return tokens.squeeze(0).mean(dim=0).cpu()  # (C,)
 
 
 @torch.inference_mode()
@@ -296,18 +274,14 @@ def cache_cinema_cls_features(
     cache_dir: Path,
     device: torch.device | None = None,
 ) -> list[dict]:
-    """Extract and cache per-slice CineMA embeddings, one .pt file per slice.
+    """Extract and cache global-mean-pooled CineMA embeddings, one .pt per frame.
 
     For each 3D SAX volume (ED or ES), runs the CineMA backbone once and
-    decomposes the resulting token grid into per-slice mean-pooled embeddings
-    (see :func:`_extract_cinema_per_slice_tokens`).  Each slice is saved as
+    global-mean-pools all spatial tokens into a single ``(embed_dim,)`` vector
+    (see :func:`_extract_cinema_volume_token`).  Saved as
     ``{"cls_token": Tensor(embed_dim,)}`` — the same format used by
     :func:`cache_cls_features` for DINOv3 — so :func:`load_cached_cls_features`
-    and :func:`build_patient_features` work identically for both backbones.
-
-    This per-slice protocol ensures a fair comparison: both backbones produce
-    one embedding per 2D slice, and patient-level features are built by
-    mean-pooling across slices within each cardiac phase (ED / ES).
+    and :func:`build_patient_features` work identically for all backbones.
 
     Args:
         backbone: Frozen CineMA backbone in eval mode.
@@ -316,8 +290,7 @@ def cache_cinema_cls_features(
         device: Device for inference.
 
     Returns:
-        Manifest — list of dicts with keys ``path``, ``pid``, ``is_ed``,
-        ``z_idx``.
+        Manifest — list of dicts with keys ``path``, ``pid``, ``is_ed``.
     """
     cache_dir = Path(cache_dir)
     cache_dir.mkdir(parents=True, exist_ok=True)
@@ -326,31 +299,17 @@ def cache_cinema_cls_features(
     for sample_idx in tqdm(range(len(cinema_dataset)), desc="Caching CineMA features"):
         sample = cinema_dataset[sample_idx]
         image_3d = sample["sax_image"]  # (1, H, W, z)
-        n_slices = int(sample["n_slices"])
         pid = sample["pid"]
         is_ed = sample["is_ed"]
         frame = "ed" if is_ed else "es"
 
-        # Check if all slices for this volume are already cached
-        slice_paths = [
-            cache_dir / f"{pid}_{frame}_z{z:02d}.pt" for z in range(n_slices)
-        ]
-        all_cached = all(p.exists() for p in slice_paths)
+        fpath = cache_dir / f"{pid}_{frame}.pt"
 
-        if not all_cached:
-            per_slice = _extract_cinema_per_slice_tokens(
-                backbone, image_3d, n_slices, device,
-            )
-            for z, (token, fpath) in enumerate(
-                zip(per_slice, slice_paths, strict=True)
-            ):
-                if not fpath.exists():
-                    torch.save({"cls_token": token}, fpath)
+        if not fpath.exists():
+            token = _extract_cinema_volume_token(backbone, image_3d, device)
+            torch.save({"cls_token": token}, fpath)
 
-        for z, fpath in enumerate(slice_paths):
-            manifest.append(
-                {"path": fpath, "pid": pid, "is_ed": is_ed, "z_idx": z}
-            )
+        manifest.append({"path": fpath, "pid": pid, "is_ed": is_ed})
 
     return manifest
 
@@ -509,7 +468,7 @@ def sweep_C_and_train(
             pipe = Pipeline([
                 ("scaler", StandardScaler()),
                 ("clf", LogisticRegression(
-                    solver="lbfgs", C=C, l1_ratio=0,
+                    solver="lbfgs", C=C,
                     max_iter=max_iter, tol=tol,
                 )),
             ])
@@ -530,7 +489,7 @@ def sweep_C_and_train(
     final_pipeline = Pipeline([
         ("scaler", StandardScaler()),
         ("clf", LogisticRegression(
-            solver="lbfgs", C=best_C, l1_ratio=0,
+            solver="lbfgs", C=best_C,
             max_iter=max_iter, tol=tol,
         )),
     ])
@@ -551,7 +510,7 @@ def evaluate_classification(
                or a bare LogisticRegression.
 
     Returns:
-        Dict with keys: accuracy, macro_f1, per_class_accuracy,
+        Dict with keys: accuracy, macro_f1,
         per_class_sensitivity, per_class_specificity, macro_sensitivity,
         macro_specificity, confusion_matrix, classification_report,
         predictions, probabilities.
@@ -566,8 +525,7 @@ def evaluate_classification(
 
     cm = confusion_matrix(y_true, y_pred, labels=list(range(NUM_PATHOLOGIES)))
 
-    # Per-class accuracy, sensitivity (TPR), and specificity (TNR)
-    per_class_acc: dict[str, float] = {}
+    # Per-class sensitivity (TPR) and specificity (TNR)
     per_class_sensitivity: dict[str, float] = {}
     per_class_specificity: dict[str, float] = {}
     total = cm.sum()
@@ -577,10 +535,6 @@ def evaluate_classification(
         fn = cm[cls_idx, :].sum() - tp
         fp = cm[:, cls_idx].sum() - tp
         tn = total - tp - fn - fp
-
-        mask = y_true == cls_idx
-        if mask.sum() > 0:
-            per_class_acc[cls_name] = float(accuracy_score(y_true[mask], y_pred[mask]))
 
         per_class_sensitivity[cls_name] = (
             float(tp / (tp + fn)) if (tp + fn) > 0 else 0.0
@@ -610,7 +564,6 @@ def evaluate_classification(
         "macro_f1": macro_f1,
         "macro_sensitivity": macro_sensitivity,
         "macro_specificity": macro_specificity,
-        "per_class_accuracy": per_class_acc,
         "per_class_sensitivity": per_class_sensitivity,
         "per_class_specificity": per_class_specificity,
         "confusion_matrix": cm,
