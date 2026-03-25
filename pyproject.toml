@@ -46,7 +46,9 @@ dependencies = [
     "tensorboard",
     "wandb",
     "dinov3 @ git+https://github.com/facebookresearch/dinov3/",
-    "ipykernel"
+    "ipykernel",
+    "transformers",
+    "seaborn>=0.13.2",
 ]
 
 [project.optional-dependencies]

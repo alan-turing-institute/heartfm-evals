@@ -160,7 +160,11 @@ Thumbs.db
 #Models directory
 # models/
 model_weights/
+feature_cache/
+cls_feature_cache/
+linear_feature_cache/
 
 .vscode/
 
 notebooks/images/
+data/heartfm/processed/acdc/*
