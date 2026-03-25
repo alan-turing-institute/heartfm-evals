@@ -207,17 +207,23 @@ def cache_features(
     Saves one .pt file per 2D slice containing {"features": Tensor, "label": Tensor}.
     Returns a manifest (list of dicts) with paths and metadata.
 
+    The actual files are stored in a subdirectory of ``cache_dir`` whose name encodes
+    ``layer_indices`` (e.g. ``layers_3-6-9-11``). This means that changing
+    ``layer_indices`` and reusing the same ``cache_dir`` will write to a different
+    subdirectory, preventing silent reuse of incompatible cached tensors.
+
     Args:
         backbone: Frozen DINOv3 backbone in eval mode.
         cinema_dataset: CineMA EndDiastoleEndSystoleDataset.
-        cache_dir: Directory to save cached features.
+        cache_dir: Root directory under which layer-specific subdirectories are created.
         layer_indices: Which intermediate layers to extract.
         device: Device for inference.
 
     Returns:
         List of dicts with keys: path, pid, is_ed, z_idx.
     """
-    cache_dir = Path(cache_dir)
+    layers_tag = "layers_" + "-".join(str(i) for i in sorted(layer_indices))
+    cache_dir = Path(cache_dir) / layers_tag
     cache_dir.mkdir(parents=True, exist_ok=True)
     manifest: list[dict] = []
 
