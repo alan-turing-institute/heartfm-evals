@@ -4,6 +4,8 @@ Dense Probe: Pixel-Level Cardiac Segmentation with SAM on ACDC
 Architecture: Frozen SAM image encoder -> cached image embeddings ->
 bilinear upsample -> small conv decoder -> class logits (BG, RV, MYO, LV).
 """
+
+import argparse
 from pathlib import Path
 
 import matplotlib.patches as mpatches
@@ -33,18 +35,35 @@ from heartfm_evals.dense_linear_probe import (
     train_one_epoch,
 )
 
+_SAM_VARIANTS = [
+    "facebook/sam-vit-base",
+    "facebook/sam-vit-large",
+    "facebook/sam-vit-huge",
+]
+
+parser = argparse.ArgumentParser(
+    description="Dense segmentation probe with SAM on ACDC"
+)
+parser.add_argument(
+    "--model",
+    default="facebook/sam-vit-base",
+    choices=_SAM_VARIANTS,
+    help="SAM model variant to use",
+)
+args = parser.parse_args()
+
 # -- Paths --
 ACDC_DATA_DIR = Path("/home/rwood/heartfm/data-evals/acdc/")
 
 # -- SAM source --
 # Default behavior: auto-download from Hugging Face on first run.
-SAM_MODEL_ID = "facebook/sam-vit-base"
+SAM_MODEL_ID = args.model
 SAM_LOCAL_DIR = None  # optional: Path("../model_weights/sam-vit-base")
 HF_CACHE_DIR = Path("../model_weights/hf")
 AUTO_DOWNLOAD = True
 
 # -- Cache --
-CACHE_NAME = "sam_vit_base"
+CACHE_NAME = SAM_MODEL_ID.split("/")[-1].replace("-", "_")
 CACHE_DIR = Path(f"../feature_cache/{CACHE_NAME}")
 
 # -- Training --
@@ -78,14 +97,14 @@ test_meta_df = pd.read_csv(ACDC_DATA_DIR / "test_metadata.csv")
 
 if "pathology" in train_meta_df.columns:
     val_pids = (
-        train_meta_df.groupby("pathology")
-        .sample(n=2, random_state=0)["pid"]
-        .tolist()
+        train_meta_df.groupby("pathology").sample(n=2, random_state=0)["pid"].tolist()
     )
 else:
     val_pids = train_meta_df.sample(frac=0.1, random_state=0)["pid"].tolist()
 
-train_split_df = train_meta_df[~train_meta_df["pid"].isin(val_pids)].reset_index(drop=True)
+train_split_df = train_meta_df[~train_meta_df["pid"].isin(val_pids)].reset_index(
+    drop=True
+)
 val_split_df = train_meta_df[train_meta_df["pid"].isin(val_pids)].reset_index(drop=True)
 
 print(f"Train split: {len(train_split_df)} patients")
@@ -132,11 +151,15 @@ else:
         cache_dir=str(HF_CACHE_DIR),
         local_files_only=not AUTO_DOWNLOAD,
     )
-    sam_model = SamModel.from_pretrained(
-        sam_source,
-        cache_dir=str(HF_CACHE_DIR),
-        local_files_only=not AUTO_DOWNLOAD,
-    ).to(DEVICE).eval()
+    sam_model = (
+        SamModel.from_pretrained(
+            sam_source,
+            cache_dir=str(HF_CACHE_DIR),
+            local_files_only=not AUTO_DOWNLOAD,
+        )
+        .to(DEVICE)
+        .eval()
+    )
 for p in sam_model.parameters():
     p.requires_grad = False
 
@@ -225,13 +248,23 @@ def cache_sam_features(
                     aug_name = f"{pid}_{frame}_z{z:02d}_aug{aug_idx:02d}.pt"
                     aug_path = cache_dir / aug_name
                     if aug_path.exists():
-                        manifest.append({"path": aug_path, "pid": pid, "is_ed": is_ed, "z_idx": z})
+                        manifest.append(
+                            {"path": aug_path, "pid": pid, "is_ed": is_ed, "z_idx": z}
+                        )
                         continue
 
-                    aug_img, aug_lbl = _augment_slice(image_2d.clone(), label_2d.clone())
-                    aug_feats = extract_sam_features(sam_model, image_processor, aug_img, device)
-                    torch.save({"features": aug_feats, "label": aug_lbl.long()}, aug_path)
-                    manifest.append({"path": aug_path, "pid": pid, "is_ed": is_ed, "z_idx": z})
+                    aug_img, aug_lbl = _augment_slice(
+                        image_2d.clone(), label_2d.clone()
+                    )
+                    aug_feats = extract_sam_features(
+                        sam_model, image_processor, aug_img, device
+                    )
+                    torch.save(
+                        {"features": aug_feats, "label": aug_lbl.long()}, aug_path
+                    )
+                    manifest.append(
+                        {"path": aug_path, "pid": pid, "is_ed": is_ed, "z_idx": z}
+                    )
 
     return manifest
 
@@ -248,10 +281,14 @@ train_manifest = cache_sam_features(
 )
 
 print("\nCaching validation features...")
-val_manifest = cache_sam_features(sam_model, image_processor, val_cinema, CACHE_DIR / "val", DEVICE)
+val_manifest = cache_sam_features(
+    sam_model, image_processor, val_cinema, CACHE_DIR / "val", DEVICE
+)
 
 print("\nCaching test features...")
-test_manifest = cache_sam_features(sam_model, image_processor, test_cinema, CACHE_DIR / "test", DEVICE)
+test_manifest = cache_sam_features(
+    sam_model, image_processor, test_cinema, CACHE_DIR / "test", DEVICE
+)
 
 sample = torch.load(train_manifest[0]["path"], weights_only=True)
 print(f"Cached train slices: {len(train_manifest)}")
@@ -271,11 +308,19 @@ class WeightedCombinedLoss(nn.Module):
         self.dice_weight = dice_weight
 
     def forward(self, logits, targets):
-        return self.ce_weight * self.ce(logits, targets.long()) + self.dice_weight * self.dice(logits, targets)
+        return self.ce_weight * self.ce(
+            logits, targets.long()
+        ) + self.dice_weight * self.dice(logits, targets)
 
 
 class SAMDenseProbe(nn.Module):
-    def __init__(self, in_channels, num_classes=NUM_CLASSES, output_size=(IMAGE_SIZE, IMAGE_SIZE), hidden_dim=128):
+    def __init__(
+        self,
+        in_channels,
+        num_classes=NUM_CLASSES,
+        output_size=(IMAGE_SIZE, IMAGE_SIZE),
+        hidden_dim=128,
+    ):
         super().__init__()
         self.output_size = output_size
         self.decoder = nn.Sequential(
@@ -289,7 +334,9 @@ class SAMDenseProbe(nn.Module):
         self.head = nn.Conv2d(hidden_dim, num_classes, kernel_size=1)
 
     def forward(self, features):
-        x = F.interpolate(features, size=self.output_size, mode="bilinear", align_corners=False)
+        x = F.interpolate(
+            features, size=self.output_size, mode="bilinear", align_corners=False
+        )
         x = self.decoder(x)
         return self.head(x)
 
@@ -310,16 +357,21 @@ for entry in train_manifest:
     y = torch.load(entry["path"], weights_only=True)["label"]
     class_counts += torch.bincount(y.long().reshape(-1), minlength=NUM_CLASSES)
 
-class_weights = class_counts.sum().float() / (NUM_CLASSES * class_counts.clamp_min(1).float())
+class_weights = class_counts.sum().float() / (
+    NUM_CLASSES * class_counts.clamp_min(1).float()
+)
 class_weights[0] = class_weights[0] * 0.5  # down-weight background
 class_weights = class_weights / class_weights.mean()
-criterion = WeightedCombinedLoss(class_weights.to(DEVICE), ce_weight=1.0, dice_weight=1.0)
+criterion = WeightedCombinedLoss(
+    class_weights.to(DEVICE), ce_weight=1.0, dice_weight=1.0
+)
 optimizer = torch.optim.AdamW(probe.parameters(), lr=LR, weight_decay=WEIGHT_DECAY)
 scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=N_EPOCHS)
 
 print(f"Dense probe input channels: {in_channels}")
 print(f"Class weights (BG/RV/MYO/LV): {class_weights.tolist()}")
-print(f"Trainable params: {sum(p.numel() for p in probe.parameters() if p.requires_grad):,}")
+n_trainable = sum(p.numel() for p in probe.parameters() if p.requires_grad)
+print(f"Trainable params: {n_trainable:,}")
 
 best_val_dice = 0.0
 best_epoch = 0
@@ -340,24 +392,32 @@ for epoch in range(1, N_EPOCHS + 1):
     improved = val_dice > best_val_dice
     if epoch == 1 or epoch % 5 == 0 or improved:
         tag = " *" if improved else ""
+        lr = optimizer.param_groups[0]["lr"]
         print(
-            f"Epoch {epoch:3d}/{N_EPOCHS} | loss={train_loss:.4f} | val Dice={val_dice:.4f} | "
-            f"lr={optimizer.param_groups[0]['lr']:.2e}{tag}"
+            f"Epoch {epoch:3d}/{N_EPOCHS} | loss={train_loss:.4f} "
+            f"| val Dice={val_dice:.4f} | lr={lr:.2e}{tag}"
         )
 
     if improved:
         best_val_dice = val_dice
         best_epoch = epoch
         epochs_no_improve = 0
-        best_state = {k: v.detach().cpu().clone() for k, v in probe.state_dict().items()}
+        best_state = {
+            k: v.detach().cpu().clone() for k, v in probe.state_dict().items()
+        }
     else:
         epochs_no_improve += 1
         if epochs_no_improve >= PATIENCE:
-            print(f"Early stopping at epoch {epoch}. Best val Dice={best_val_dice:.4f} at epoch {best_epoch}.")
+            print(
+                f"Early stopping at epoch {epoch}. "
+                f"Best val Dice={best_val_dice:.4f} at epoch {best_epoch}."
+            )
             break
 
 probe.load_state_dict(best_state)
-print(f"Restored best checkpoint from epoch {best_epoch} (val Dice={best_val_dice:.4f})")
+print(
+    f"Restored best checkpoint from epoch {best_epoch} (val Dice={best_val_dice:.4f})"
+)
 
 fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 4), dpi=150)
 ax1.plot(history["train_loss"], label="Train Loss")
@@ -368,7 +428,9 @@ ax1.grid(True, alpha=0.3)
 ax1.legend()
 
 ax2.plot(history["val_macro_dice"], label="Val Macro Dice", color="tab:orange")
-ax2.axhline(best_val_dice, ls="--", color="gray", alpha=0.5, label=f"Best={best_val_dice:.4f}")
+ax2.axhline(
+    best_val_dice, ls="--", color="gray", alpha=0.5, label=f"Best={best_val_dice:.4f}"
+)
 ax2.set_xlabel("Epoch")
 ax2.set_ylabel("Macro Dice (excl. BG)")
 ax2.set_title("Validation Performance")
@@ -376,7 +438,7 @@ ax2.grid(True, alpha=0.3)
 ax2.legend()
 
 plt.tight_layout()
-plt.savefig("sam_training_curves.png", dpi=150)
+plt.savefig(f"{CACHE_NAME}_training_curves.png", dpi=150)
 plt.close()
 
 
@@ -410,7 +472,9 @@ with torch.inference_mode():
         pred_overlay = overlay_labels(pred, IMAGE_SIZE, IMAGE_SIZE)
 
         axes[row, 0].imshow(label, cmap="tab10", vmin=0, vmax=3)
-        axes[row, 0].set_title(f"GT Labels ({entry['pid']}, z={entry['z_idx']})", fontsize=9)
+        axes[row, 0].set_title(
+            f"GT Labels ({entry['pid']}, z={entry['z_idx']})", fontsize=9
+        )
         axes[row, 0].axis("off")
 
         axes[row, 1].imshow(gt_overlay)
@@ -418,21 +482,23 @@ with torch.inference_mode():
         axes[row, 1].axis("off")
 
         axes[row, 2].imshow(pred_overlay)
-        axes[row, 2].set_title(f"Predicted (Dice={macro_dice(pred, label):.3f})", fontsize=9)
+        axes[row, 2].set_title(
+            f"Predicted (Dice={macro_dice(pred, label):.3f})", fontsize=9
+        )
         axes[row, 2].axis("off")
 
 legend_patches = [
-    mpatches.Patch(color=CLASS_COLORS[c][:3] + (1.0,), label=CLASS_NAMES[c])
+    mpatches.Patch(color=(*CLASS_COLORS[c][:3], 1.0), label=CLASS_NAMES[c])
     for c in range(1, NUM_CLASSES)
 ]
 axes[-1, 2].legend(handles=legend_patches, loc="lower right", fontsize=8)
 plt.tight_layout()
-plt.savefig("sam_test_predictions.png", dpi=150)
+plt.savefig(f"{CACHE_NAME}_test_predictions.png", dpi=150)
 plt.close()
 
 
 # -- Save Model --
-save_path = Path("dense_probe_sam_vit_base.pt")
+save_path = Path(f"dense_probe_{CACHE_NAME}.pt")
 torch.save(
     {
         "model_state_dict": probe.state_dict(),
