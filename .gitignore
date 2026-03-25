@@ -180,3 +180,7 @@ notebooks/*.pth
 scripts/*.pt
 scripts/*png
 scripts/*.out
+
+
+cls_feature_cache/
+linear_feature_cache/
