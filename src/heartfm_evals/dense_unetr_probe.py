@@ -1,12 +1,15 @@
-"""3D UNetR decoder probe for DINOv3 backbone evaluation.
+"""3D UNetR decoder probes for DINOv3 and CineMA backbone evaluation.
 
-Uses CineMA's UpsampleDecoder to decode frozen DINOv3 features stacked along z.
-Enables fair comparison: DINOv3 encoder vs CineMA encoder with identical 3D decoder.
+Uses CineMA's UpsampleDecoder to decode frozen backbone features for 3D
+segmentation.  Two decoder models are provided:
 
-Architecture:
-    For each slice z in a padded volume: frozen DINOv3 → features at selected layers.
-    Stack all slices along z, upsample/adapt to multi-scale skip connections,
-    then decode with UpsampleDecoder(n_dims=3) → dense 3D segmentation logits.
+- ``DINOv3UNetRDecoder``: takes per-slice DINOv3 features stacked along z,
+  synthesises multi-scale skip connections via bilinear upsampling.
+- ``CineMAUNetRDecoder``: takes CineMA's native multi-scale conv encoder
+  skips + ViT features, wired exactly like ``ConvUNetR``'s decoder.
+
+Both enable a fair comparison: DINOv3 encoder vs CineMA encoder with an
+identical 3D UpsampleDecoder.
 """
 
 from __future__ import annotations
@@ -348,6 +351,336 @@ class DINOv3UNetRDecoder(nn.Module):
         return self.pred_head(x)  # (B, num_classes, H, W, Z)
 
 
+# ── CineMA Feature Extraction ──────────────────────────────────────────────────
+def _pad_volume_z(vol: torch.Tensor, target_depth: int) -> tuple[torch.Tensor, int]:
+    """Pad or truncate the last (z) dimension to *target_depth*.
+
+    Returns (padded_volume, actual_slices_before_padding).
+    """
+    n_slices = int(vol.shape[-1])
+    if n_slices > target_depth:
+        vol = vol[..., :target_depth]
+        n_slices = target_depth
+    elif vol.shape[-1] < target_depth:
+        vol = F.pad(vol, (0, target_depth - vol.shape[-1]), mode="constant", value=0.0)
+    return vol, n_slices
+
+
+@torch.inference_mode()
+def extract_cinema_volume_features(
+    backbone: nn.Module,
+    sax_volume: torch.Tensor,
+    device: torch.device | None = None,
+    target_depth: int = SAX_TARGET_DEPTH,
+) -> tuple[dict[str, torch.Tensor], torch.Tensor, int]:
+    """Extract CineMA conv-encoder skips and ViT features for a SAX volume.
+
+    Runs the frozen CineMA encoder (``enc_down_dict["sax"]`` + ``encoder``)
+    and returns the multi-scale conv skips together with the reshaped ViT
+    output.  These are the ingredients needed by ``CineMAUNetRDecoder``.
+
+    Args:
+        backbone: Frozen CineMA model (``CineMA.from_pretrained()``).
+        sax_volume: ``(1, H, W, z)`` tensor in [0, 1].
+        device: Device for inference.
+        target_depth: Pad z to this depth.
+
+    Returns:
+        Tuple of ``(features_dict, padded_image, n_slices)``:
+            features_dict: ``{"conv_skip_0": ..., ..., "vit_features": ...}``
+            padded_image: ``(1, H, W, target_depth)``
+            n_slices: actual number of slices before padding.
+    """
+    vol, n_slices = _pad_volume_z(sax_volume, target_depth)
+
+    # CineMA expects (B, 1, H, W, Z) — add batch dim
+    batch_input = vol.unsqueeze(0)  # (1, 1, H, W, Z)
+    if device is not None:
+        batch_input = batch_input.to(device=device, dtype=torch.float32)
+
+    # 1. Conv encoder: multi-scale skips + patch-embedded tokens
+    skips_list, x_view = backbone.enc_down_dict["sax"](batch_input, mask=None)
+    # skips_list: list of (1, ch, *spatial), x_view: (1, n_patches, embed_dim)
+
+    # 2. Shared ViT encoder
+    x = backbone.encoder(x_view)  # (1, 1+n_patches, embed_dim)
+    x = x[:, 1:]  # strip cls token → (1, n_patches, embed_dim)
+
+    # 3. Reshape ViT output to spatial grid
+    grid_size = backbone.enc_down_dict["sax"].patch_embed.grid_size
+    x = x.permute(0, 2, 1)  # (1, embed_dim, n_patches)
+    vit_feat = x.reshape(1, x.shape[1], *grid_size)  # (1, embed_dim, gx, gy, gz)
+
+    # Build return dict — move everything to CPU
+    features_dict: dict[str, torch.Tensor] = {}
+    for i, skip in enumerate(skips_list):
+        features_dict[f"conv_skip_{i}"] = skip.squeeze(0).cpu()
+    features_dict["vit_features"] = vit_feat.squeeze(0).cpu()
+
+    return features_dict, vol, n_slices
+
+
+def cache_cinema_volume_features(
+    backbone: nn.Module,
+    cinema_dataset,
+    cache_dir: Path,
+    device: torch.device | None = None,
+    target_depth: int = SAX_TARGET_DEPTH,
+) -> list[dict]:
+    """Cache volume-level CineMA encoder features for all patients/frames.
+
+    Saves one ``.pt`` file per patient+frame containing conv skips, ViT
+    features, the padded image, padded label, and the actual slice count.
+
+    Args:
+        backbone: Frozen CineMA model in eval mode.
+        cinema_dataset: CineMA ``EndDiastoleEndSystoleDataset``.
+        cache_dir: Root cache directory.
+        device: Device for inference.
+        target_depth: Pad z to this depth.
+
+    Returns:
+        List of dicts with keys: ``path``, ``pid``, ``is_ed``, ``n_slices``.
+    """
+    out_dir = Path(cache_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    manifest: list[dict] = []
+
+    for sample_idx in tqdm(
+        range(len(cinema_dataset)), desc="Caching CineMA volume features"
+    ):
+        sample = cinema_dataset[sample_idx]
+        image_3d = sample["sax_image"]  # (1, H, W, z)
+        label_3d = sample["sax_label"]  # (1, H, W, z)
+        n_slices = int(sample["n_slices"])
+        pid = sample["pid"]
+        is_ed = sample["is_ed"]
+        frame = "ed" if is_ed else "es"
+
+        fname = f"{pid}_{frame}.pt"
+        fpath = out_dir / fname
+
+        if fpath.exists():
+            manifest.append(
+                {"path": fpath, "pid": pid, "is_ed": is_ed, "n_slices": n_slices}
+            )
+            continue
+
+        features_dict, padded_image, actual_slices = extract_cinema_volume_features(
+            backbone, image_3d, device, target_depth
+        )
+
+        # Pad label along z
+        label, _ = _pad_volume_z(label_3d, target_depth)
+
+        save_dict: dict = {
+            "image": padded_image,  # (1, H, W, target_depth)
+            "label": label.long(),  # (1, H, W, target_depth)
+            "n_slices": actual_slices,
+        }
+        save_dict.update(features_dict)
+
+        torch.save(save_dict, fpath)
+        manifest.append(
+            {"path": fpath, "pid": pid, "is_ed": is_ed, "n_slices": actual_slices}
+        )
+
+    return manifest
+
+
+# ── CineMA Cached Dataset ──────────────────────────────────────────────────────
+class CachedCinemaVolumeDataset(Dataset):
+    """Loads pre-cached CineMA volume-level features from ``.pt`` files."""
+
+    def __init__(
+        self,
+        manifest: list[dict],
+        n_conv_skips: int = 3,
+    ):
+        self.manifest = manifest
+        self.n_conv_skips = n_conv_skips
+
+    def __len__(self) -> int:
+        return len(self.manifest)
+
+    def __getitem__(self, idx: int) -> dict:
+        entry = self.manifest[idx]
+        data = torch.load(entry["path"], weights_only=True)
+        result: dict = {
+            "image": data["image"],  # (1, H, W, Z)
+            "label": data["label"],  # (1, H, W, Z)
+            "n_slices": data["n_slices"],
+            "pid": entry["pid"],
+            "vit_features": data["vit_features"],
+        }
+        for i in range(self.n_conv_skips):
+            result[f"conv_skip_{i}"] = data[f"conv_skip_{i}"]
+        return result
+
+
+# ── CineMA UNetR Decoder ───────────────────────────────────────────────────────
+class CineMAUNetRDecoder(nn.Module):
+    """3D UNetR decoder for CineMA backbone features.
+
+    Mirrors the decoder wiring in ``ConvUNetR.forward()``.  Takes CineMA's
+    natural multi-scale conv-encoder skips + ViT features and decodes with
+    ``UpsampleDecoder`` to produce dense 3D segmentation logits.
+
+    Skip-connection wiring (default SAX config, 192x192x16 input):
+
+    ========  ===========  =========  ============  ================
+    Emb idx   Source       Spatial    Out channels  Note
+    ========  ===========  =========  ============  ================
+    0         image_conv   192x192    32            shallowest
+    1         None         --         --            n_layers_wo_skip
+    2         conv_skip_0  48x48      64            1st conv skip
+    3         conv_skip_1  24x24      128           2nd conv skip
+    4         vit_output   12x12      256           ViT features
+    5         bottleneck   6x6        512           downsampled ViT
+    ========  ===========  =========  ============  ================
+
+    ``UpsampleDecoder`` pops from the end (bottleneck first).
+    """
+
+    def __init__(
+        self,
+        enc_embed_dim: int = 768,
+        enc_conv_chans: tuple[int, ...] = (64, 128),
+        dec_chans: tuple[int, ...] = (32, 64, 128, 256, 512),
+        dec_patch_size: tuple[int, int, int] = (2, 2, 1),
+        dec_scale_factor: tuple[int, int, int] = (2, 2, 1),
+        num_classes: int = NUM_CLASSES,
+        n_layers_wo_skip: int = 1,
+        in_chans: int = 1,
+        norm: str = "layer",
+        dropout: float = 0.0,
+    ):
+        super().__init__()
+        self.n_layers_wo_skip = n_layers_wo_skip
+
+        # Image path: raw image -> shallowest skip
+        self.image_conv = ConvResBlock(
+            n_dims=3, in_chans=in_chans, out_chans=dec_chans[0], norm=norm
+        )
+
+        # Conv-skip adapters.
+        # The embeddings list has len(dec_chans)+1 entries.  UpsampleDecoder
+        # pops from the end and each up-transpose produces channels that must
+        # match the skip at that position.
+        #
+        # Positions:  0 = image_conv(dec_chans[0])
+        #             1..n_layers_wo_skip = None  (no skip)
+        #             n_layers_wo_skip+1 .. n_layers_wo_skip+n_conv_skips = conv skips
+        #             next = ViT adapter
+        #             last = bottleneck (popped first as initial x)
+        #
+        # UpsampleDecoder block k pops embedding at position (len(dec_chans)-k-1)
+        # and its up-conv output has channels dec_chans[len-k-2].  So the skip
+        # at position p (p>=1) must have dec_chans[p-1] channels.
+        self.n_conv_skips = len(enc_conv_chans)
+
+        self.skip_adapters = nn.ModuleList()
+        for i, ch in enumerate(enc_conv_chans):
+            # Embedding position = 1 + n_layers_wo_skip + i
+            # Required = dec_chans[position - 1]
+            target_ch = dec_chans[n_layers_wo_skip + i]
+            self.skip_adapters.append(
+                ConvResBlock(
+                    n_dims=3,
+                    in_chans=ch,
+                    out_chans=target_ch,
+                    norm=norm,
+                    dropout=dropout,
+                )
+            )
+
+        # ViT output adapter
+        # Position = 1 + n_layers_wo_skip + n_conv_skips
+        # Required = dec_chans[n_layers_wo_skip + n_conv_skips]
+        vit_ch = dec_chans[n_layers_wo_skip + self.n_conv_skips]
+        self.vit_adapter = ConvResBlock(
+            n_dims=3,
+            in_chans=enc_embed_dim,
+            out_chans=vit_ch,
+            norm=norm,
+            dropout=dropout,
+        )
+
+        # Bottleneck: downsample ViT features spatially
+        conv_cls = nn.Conv3d
+        self.bottleneck_down = conv_cls(
+            enc_embed_dim,
+            enc_embed_dim,
+            kernel_size=tuple(dec_scale_factor),  # type: ignore[arg-type]
+            stride=tuple(dec_scale_factor),  # type: ignore[arg-type]
+        )
+        self.bottleneck_adapter = ConvResBlock(
+            n_dims=3,
+            in_chans=enc_embed_dim,
+            out_chans=dec_chans[-1],
+            norm=norm,
+            dropout=dropout,
+        )
+
+        # CineMA UpsampleDecoder
+        self.decoder = UpsampleDecoder(
+            n_dims=3,
+            chans=dec_chans,
+            patch_size=dec_patch_size,
+            scale_factor=dec_scale_factor,
+            norm=norm,
+            dropout=dropout,
+        )
+
+        # Prediction head
+        self.pred_head = nn.Conv3d(dec_chans[0], num_classes, kernel_size=1)
+
+    def forward(self, batch: dict[str, torch.Tensor]) -> torch.Tensor:
+        """Forward pass.
+
+        Args:
+            batch: Dict with keys ``"image"`` (B, 1, H, W, Z),
+                   ``"conv_skip_0"``..``"conv_skip_{N-1}"`` from conv encoder,
+                   and ``"vit_features"`` (B, embed_dim, gx, gy, gz).
+
+        Returns:
+            logits: (B, num_classes, H, W, Z)
+        """
+        image = batch["image"]  # (B, 1, H, W, Z)
+        vit_feat = batch["vit_features"]  # (B, embed_dim, gx, gy, gz)
+
+        # Shallowest skip: raw image
+        img_skip = self.image_conv(image)  # (B, dec_chans[0], H, W, Z)
+
+        # Conv-encoder skips: adapt channels
+        conv_skips = []
+        for i in range(self.n_conv_skips):
+            skip = batch[f"conv_skip_{i}"]  # (B, ch_i, sx, sy, Z)
+            conv_skips.append(self.skip_adapters[i](skip))
+
+        # ViT output: adapt channels
+        vit_skip = self.vit_adapter(vit_feat)
+
+        # Bottleneck: downsample ViT features
+        down = self.bottleneck_down(vit_feat)
+        bottleneck = self.bottleneck_adapter(down)
+
+        # Build embeddings list (UpsampleDecoder pops from the end)
+        # Order: [shallowest, ..., deepest]
+        embeddings: list[torch.Tensor | None] = [img_skip]
+        # Decoder levels with no encoder skip
+        for _ in range(self.n_layers_wo_skip):
+            embeddings.append(None)
+        # Conv-encoder skips
+        for skip in conv_skips:
+            embeddings.append(skip)
+        embeddings.append(vit_skip)
+        embeddings.append(bottleneck)
+
+        x = self.decoder(embeddings)  # (B, dec_chans[0], H, W, Z)
+        return self.pred_head(x)  # (B, num_classes, H, W, Z)
+
+
 # ── Loss ────────────────────────────────────────────────────────────────────────
 class MaskedVolumeLoss(nn.Module):
     """Weighted CE + Dice loss, with CE masked to exclude z-padded slices.
@@ -414,6 +747,19 @@ class MaskedVolumeLoss(nn.Module):
         return self.ce_weight * ce + self.dice_weight * dice_loss
 
 
+# ── Helpers ─────────────────────────────────────────────────────────────────────
+_NON_MODEL_KEYS = {"label", "n_slices", "pid"}
+
+
+def _batch_to_device(batch: dict, device: torch.device) -> dict[str, torch.Tensor]:
+    """Move all tensor values (except label/n_slices/pid) to *device*."""
+    return {
+        k: v.to(device)
+        for k, v in batch.items()
+        if k not in _NON_MODEL_KEYS and isinstance(v, torch.Tensor)
+    }
+
+
 # ── Training ────────────────────────────────────────────────────────────────────
 def train_one_epoch_vol(
     model: nn.Module,
@@ -421,7 +767,7 @@ def train_one_epoch_vol(
     criterion: MaskedVolumeLoss,
     optimizer: torch.optim.Optimizer,
     device: torch.device,
-    layer_indices: tuple[int, ...] = (3, 6, 9, 11),
+    **_kwargs,
 ) -> float:
     """Train for one epoch on cached volume features.  Returns mean loss."""
     model.train()
@@ -429,11 +775,7 @@ def train_one_epoch_vol(
     n_batches = 0
 
     for batch in dataloader:
-        batch_gpu: dict[str, torch.Tensor] = {
-            "image": batch["image"].to(device),
-        }
-        for idx in layer_indices:
-            batch_gpu[f"layer_{idx}"] = batch[f"layer_{idx}"].to(device)
+        batch_gpu = _batch_to_device(batch, device)
 
         labels = batch["label"].to(device)  # (B, 1, H, W, Z)
         n_slices = batch["n_slices"].to(device)  # (B,)
@@ -457,7 +799,7 @@ def evaluate_vol(
     model: nn.Module,
     dataloader,
     device: torch.device,
-    layer_indices: tuple[int, ...] = (3, 6, 9, 11),
+    **_kwargs,
 ) -> dict:
     """Evaluate on cached volume features.
 
@@ -468,11 +810,7 @@ def evaluate_vol(
     all_labels: list[np.ndarray] = []
 
     for batch in dataloader:
-        batch_gpu: dict[str, torch.Tensor] = {
-            "image": batch["image"].to(device),
-        }
-        for idx in layer_indices:
-            batch_gpu[f"layer_{idx}"] = batch[f"layer_{idx}"].to(device)
+        batch_gpu = _batch_to_device(batch, device)
 
         labels = batch["label"]  # (B, 1, H, W, Z)
         n_slices = batch["n_slices"]  # (B,)
