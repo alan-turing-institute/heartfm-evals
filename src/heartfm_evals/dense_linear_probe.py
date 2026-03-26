@@ -310,6 +310,7 @@ class ACDCSliceDataset(Dataset):
         if self._cache_key != sample_idx:
             self._cache_key = sample_idx
             self._cache_value = self.cinema_dataset[sample_idx]
+        assert self._cache_value is not None
         return self._cache_value
 
     def __getitem__(self, idx: int) -> dict:
