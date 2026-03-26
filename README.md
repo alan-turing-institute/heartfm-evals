@@ -27,6 +27,32 @@ uv pip install -e .
 
 ## Usage
 
+### Running the scripts
+
+Scripts are in the `scripts/` directory. Each script runs one or more model size variants.
+
+Redirect output to a `.out` file to capture logs:
+
+```bash
+cd scripts/
+
+# SAM (vit-base, vit-large, vit-huge)
+bash run_sam_variants.sh > sam_variants.out
+
+# SAM 2.1 (hiera-tiny, hiera-small, hiera-base-plus, hiera-large)
+bash run_sam2_variants.sh > sam2_variants.out
+
+# SAM 3
+bash run_sam3.sh > sam3.out
+
+# DINOv3 (vits16, vitb16, vitl16)
+bash run_dino_variants.sh > dino_variants.out
+
+# CineMA
+bash run_cinema.sh > cinema.out
+```
+
+Each script runs the corresponding Python segmentation script and saves model checkpoints and result plots to `scripts/`.
 
 ## Contributing
 
