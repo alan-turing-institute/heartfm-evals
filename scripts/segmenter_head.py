@@ -4,6 +4,7 @@ Segmenter Head Demo
 Demonstrates DINOv3 segmentation using the dinov3_vit7b16_ms model
 with a Mask2Former head on an example image.
 """
+
 import sys
 from functools import partial
 

@@ -12,7 +12,6 @@ matching the logistic regression probe protocol.
 
 from __future__ import annotations
 
-import copy
 import logging
 from collections import defaultdict
 
@@ -65,8 +64,6 @@ def _extract_patient_feature_dinov3(
     """Extract (2*embed_dim,) patient feature from DINOv3 backbone (differentiable)."""
     image_3d = sample["sax_image"]  # (1, H, W, z)
     n_slices = int(sample["n_slices"])
-    is_ed = sample["is_ed"]
-
     slice_feats = []
     for z in range(n_slices):
         image_2d = image_3d[0, :, :, z]
@@ -200,12 +197,14 @@ def _group_samples_by_patient(
         if info["ed_idx"] is None or info["es_idx"] is None:
             logger.warning("Skipping %s: missing ED or ES frame", pid)
             continue
-        patients.append({
-            "pid": pid,
-            "label": PATHOLOGY_CLASSES[pathology_map[pid]],
-            "ed_idx": info["ed_idx"],
-            "es_idx": info["es_idx"],
-        })
+        patients.append(
+            {
+                "pid": pid,
+                "label": PATHOLOGY_CLASSES[pathology_map[pid]],
+                "ed_idx": info["ed_idx"],
+                "es_idx": info["es_idx"],
+            }
+        )
 
     return patients
 
@@ -227,8 +226,12 @@ def _preextract_all_features(
         ed_sample = cinema_dataset[pinfo["ed_idx"]]
         es_sample = cinema_dataset[pinfo["es_idx"]]
         feat = extract_patient_feature(
-            backbone, ed_sample, es_sample, device,
-            backbone_type, image_processor,
+            backbone,
+            ed_sample,
+            es_sample,
+            device,
+            backbone_type,
+            image_processor,
         )
         feats.append(feat.cpu())
     return torch.stack(feats)  # (N, 2*embed_dim)
@@ -300,10 +303,13 @@ def _train_with_lr_cached(
     """Train head on cached features, return best val accuracy and head state."""
     if scaler is not None:
         features = torch.tensor(
-            scaler.transform(features.numpy()), dtype=features.dtype,
+            scaler.transform(features.numpy()),
+            dtype=features.dtype,
         )
     optimizer = torch.optim.AdamW(head.parameters(), lr=lr, weight_decay=weight_decay)
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs, eta_min=0)
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+        optimizer, T_max=epochs, eta_min=0
+    )
     criterion = nn.CrossEntropyLoss()
 
     best_val_acc = -1.0
@@ -312,13 +318,22 @@ def _train_with_lr_cached(
 
     for epoch in range(epochs):
         _train_one_epoch_cached(
-            head, features, labels, train_indices,
-            optimizer, criterion, device,
+            head,
+            features,
+            labels,
+            train_indices,
+            optimizer,
+            criterion,
+            device,
         )
         scheduler.step()
 
         val_acc, _, _ = _evaluate_patients_cached(
-            head, features, labels, val_indices, device,
+            head,
+            features,
+            labels,
+            val_indices,
+            device,
         )
 
         if val_acc > best_val_acc:
@@ -368,13 +383,21 @@ def _train_one_epoch(
         if freeze_backbone:
             with torch.no_grad():
                 feat = extract_patient_feature(
-                    backbone, ed_sample, es_sample, device,
-                    backbone_type, image_processor,
+                    backbone,
+                    ed_sample,
+                    es_sample,
+                    device,
+                    backbone_type,
+                    image_processor,
                 )
         else:
             feat = extract_patient_feature(
-                backbone, ed_sample, es_sample, device,
-                backbone_type, image_processor,
+                backbone,
+                ed_sample,
+                es_sample,
+                device,
+                backbone_type,
+                image_processor,
             )
 
         logits = head(feat.unsqueeze(0))
@@ -415,8 +438,12 @@ def _evaluate_patients(
         es_sample = cinema_dataset[pinfo["es_idx"]]
 
         feat = extract_patient_feature(
-            backbone, ed_sample, es_sample, device,
-            backbone_type, image_processor,
+            backbone,
+            ed_sample,
+            es_sample,
+            device,
+            backbone_type,
+            image_processor,
         )
         logits = head(feat.unsqueeze(0))
         pred = logits.argmax(dim=1).item()
@@ -455,7 +482,9 @@ def _train_with_lr(
 
     optimizer = torch.optim.AdamW(params, lr=lr, weight_decay=weight_decay)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-        optimizer, T_max=epochs, eta_min=0,
+        optimizer,
+        T_max=epochs,
+        eta_min=0,
     )
     criterion = nn.CrossEntropyLoss()
 
@@ -467,15 +496,27 @@ def _train_with_lr(
     pbar = tqdm(range(epochs), desc="Fine-tuning", unit="epoch")
     for epoch in pbar:
         _train_one_epoch(
-            backbone, head, cinema_dataset, train_patients,
-            optimizer, criterion, device, backbone_type,
-            freeze_backbone, image_processor,
+            backbone,
+            head,
+            cinema_dataset,
+            train_patients,
+            optimizer,
+            criterion,
+            device,
+            backbone_type,
+            freeze_backbone,
+            image_processor,
         )
         scheduler.step()
 
         val_acc, _, _ = _evaluate_patients(
-            backbone, head, cinema_dataset, val_patients,
-            device, backbone_type, image_processor,
+            backbone,
+            head,
+            cinema_dataset,
+            val_patients,
+            device,
+            backbone_type,
+            image_processor,
         )
 
         improved = ""
@@ -484,9 +525,7 @@ def _train_with_lr(
             best_backbone_state = {
                 k: v.cpu().clone() for k, v in backbone.state_dict().items()
             }
-            best_head_state = {
-                k: v.cpu().clone() for k, v in head.state_dict().items()
-            }
+            best_head_state = {k: v.cpu().clone() for k, v in head.state_dict().items()}
             epochs_without_improvement = 0
             improved = " *"
         else:
@@ -499,8 +538,12 @@ def _train_with_lr(
         )
         logger.info(
             "Epoch %d/%d — val_acc=%.4f, best=%.4f, lr=%.4g%s",
-            epoch + 1, epochs, val_acc, best_val_acc,
-            optimizer.param_groups[0]["lr"], improved,
+            epoch + 1,
+            epochs,
+            val_acc,
+            best_val_acc,
+            optimizer.param_groups[0]["lr"],
+            improved,
         )
 
         if epochs_without_improvement >= patience:
@@ -575,8 +618,12 @@ def finetune_sweep_and_train(
     # Even when freeze_backbone=False, the sweep runs on cached features for
     # speed. The frozen LR ranking is a reliable proxy for the unfrozen case.
     cached_features = _preextract_all_features(
-        backbone, cinema_dataset, all_patients, device,
-        backbone_type, image_processor,
+        backbone,
+        cinema_dataset,
+        all_patients,
+        device,
+        backbone_type,
+        image_processor,
     )
     cached_labels = torch.tensor(labels_np, dtype=torch.long)
 
@@ -587,10 +634,16 @@ def finetune_sweep_and_train(
             scaler.fit(cached_features[train_idx].numpy())
             head = ClassificationHead(in_dim).to(device)
             val_acc, _ = _train_with_lr_cached(
-                head, cached_features, cached_labels,
-                np.array(train_idx), np.array(val_idx),
-                lr=lr, weight_decay=weight_decay,
-                epochs=epochs, patience=patience, device=device,
+                head,
+                cached_features,
+                cached_labels,
+                np.array(train_idx),
+                np.array(val_idx),
+                lr=lr,
+                weight_decay=weight_decay,
+                epochs=epochs,
+                patience=patience,
+                device=device,
                 scaler=scaler,
             )
             fold_accs.append(val_acc)
@@ -618,10 +671,16 @@ def finetune_sweep_and_train(
         all_idx = np.arange(len(all_patients))
         head = ClassificationHead(in_dim).to(device)
         _train_with_lr_cached(
-            head, cached_features, cached_labels,
-            all_idx, all_idx,
-            lr=best_lr, weight_decay=weight_decay,
-            epochs=epochs, patience=epochs, device=device,
+            head,
+            cached_features,
+            cached_labels,
+            all_idx,
+            all_idx,
+            lr=best_lr,
+            weight_decay=weight_decay,
+            epochs=epochs,
+            patience=epochs,
+            device=device,
             scaler=final_scaler,
         )
     else:
@@ -630,11 +689,17 @@ def finetune_sweep_and_train(
         # since there is no held-out validation split.
         head = ClassificationHead(in_dim).to(device)
         _train_with_lr(
-            backbone, head, cinema_dataset,
-            all_patients, all_patients,
-            lr=best_lr, weight_decay=weight_decay,
-            epochs=epochs, patience=epochs,
-            device=device, backbone_type=backbone_type,
+            backbone,
+            head,
+            cinema_dataset,
+            all_patients,
+            all_patients,
+            lr=best_lr,
+            weight_decay=weight_decay,
+            epochs=epochs,
+            patience=epochs,
+            device=device,
+            backbone_type=backbone_type,
             freeze_backbone=False,
             image_processor=image_processor,
         )
@@ -680,8 +745,12 @@ def evaluate_finetune_classification(
         es_sample = cinema_dataset[pinfo["es_idx"]]
 
         feat = extract_patient_feature(
-            backbone, ed_sample, es_sample, device,
-            backbone_type, image_processor,
+            backbone,
+            ed_sample,
+            es_sample,
+            device,
+            backbone_type,
+            image_processor,
         )
         logits = head(feat.unsqueeze(0))
         probs = torch.softmax(logits, dim=1).cpu().numpy()[0]
@@ -723,7 +792,8 @@ def evaluate_finetune_classification(
     )
 
     report = classification_report(
-        y_true, y_pred,
+        y_true,
+        y_pred,
         labels=list(range(NUM_PATHOLOGIES)),
         target_names=list(PATHOLOGY_CLASSES.keys()),
         output_dict=True,

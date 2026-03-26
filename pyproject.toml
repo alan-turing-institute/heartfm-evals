@@ -102,16 +102,12 @@ select = [
   "I",           # isort
   "ARG",         # flake8-unused-arguments
   "C4",          # flake8-comprehensions
-  "EM",          # flake8-errmsg
   "ICN",         # flake8-import-conventions
   "ISC",         # flake8-implicit-str-concat
-  "G",           # flake8-logging-format
   "PGH",         # pygrep-hooks
   "PIE",         # flake8-pie
   "PL",          # pylint
   "PT",          # flake8-pytest-style
-  "RET",         # flake8-return
-  "RUF",         # Ruff-specific
   "SIM",         # flake8-simplify
   "UP",          # pyupgrade
   "YTT",         # flake8-2020
@@ -120,12 +116,20 @@ select = [
 ignore = [
   "PLR",    # Design related pylint codes
   "ISC001", # Conflicts with formatter
+  "E501",   # Line too long
+  "SIM102", # Nested if statements
+  "SIM117", # Nested with statements
+  "E731",   # Lambda assignment
+  "E402",   # Module-level import not at top of file
 ]
 unfixable = [
   "F401",   # Would remove unused imports
   "F841",   # Would remove unused variables
 ]
 flake8-unused-arguments.ignore-variadic-names = true  # allow unused *args/**kwargs
+
+[tool.mypy]
+ignore_missing_imports = true
 
 [tool.hatch.metadata]
 allow-direct-references = true

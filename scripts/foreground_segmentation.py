@@ -3,6 +3,7 @@ Training a Foreground Segmentation Tool with DINOv3
 
 Trains a linear foreground segmentation model using DINOv3 features.
 """
+
 import os
 import pickle
 import tarfile
@@ -19,7 +20,12 @@ from sklearn.metrics import average_precision_score, precision_recall_curve
 from tqdm import tqdm
 
 REPO_DIR = "../models/dinov3/"
-model = torch.hub.load(REPO_DIR, "dinov3_vitb16", source="local", weights="../model_weights/dinov3_vitb16.pth")
+model = torch.hub.load(
+    REPO_DIR,
+    "dinov3_vitb16",
+    source="local",
+    weights="../model_weights/dinov3_vitb16.pth",
+)
 
 IMAGES_PATH = "./images/foreground_segmentation_images.tar.gz"
 LABELS_PATH = "./images/foreground_segmentation_labels.tar.gz"
@@ -83,7 +89,9 @@ def resize_transform(
     w, h = mask_image.size
     h_patches = int(image_size / patch_size)
     w_patches = int((w * image_size) / (h * patch_size))
-    return TF.to_tensor(TF.resize(mask_image, (h_patches * patch_size, w_patches * patch_size)))
+    return TF.to_tensor(
+        TF.resize(mask_image, (h_patches * patch_size, w_patches * patch_size))
+    )
 
 
 # Visualize first mask before and after quantization
@@ -119,15 +127,21 @@ with torch.inference_mode():
         for i in tqdm(range(n_images), desc="Processing images"):
             mask_i = labels[i].split()[-1]
             mask_i_resized = resize_transform(mask_i)
-            mask_i_quantized = patch_quant_filter(mask_i_resized).squeeze().view(-1).detach().cpu()
+            mask_i_quantized = (
+                patch_quant_filter(mask_i_resized).squeeze().view(-1).detach().cpu()
+            )
             ys.append(mask_i_quantized)
 
             image_i = images[i].convert("RGB")
             image_i_resized = resize_transform(image_i)
-            image_i_resized = TF.normalize(image_i_resized, mean=IMAGENET_MEAN, std=IMAGENET_STD)
+            image_i_resized = TF.normalize(
+                image_i_resized, mean=IMAGENET_MEAN, std=IMAGENET_STD
+            )
             image_i_resized = image_i_resized.unsqueeze(0)
 
-            feats = model.get_intermediate_layers(image_i_resized, n=range(n_layers), reshape=True, norm=True)
+            feats = model.get_intermediate_layers(
+                image_i_resized, n=range(n_layers), reshape=True, norm=True
+            )
             dim = feats[-1].shape[1]
             xs.append(feats[-1].squeeze().view(dim, -1).permute(1, 0).detach().cpu())
             image_index.append(i * torch.ones(ys[-1].shape))
@@ -160,7 +174,9 @@ for i in range(n_images):
     plt.figure()
     for j, c in enumerate(cs):
         print(f"training logistic regression with C={c:.2e}")
-        clf = LogisticRegression(random_state=0, C=c, max_iter=10000).fit(fold_x, fold_y)
+        clf = LogisticRegression(random_state=0, C=c, max_iter=10000).fit(
+            fold_x, fold_y
+        )
         output = clf.predict_proba(val_x)
         precision, recall, thresholds = precision_recall_curve(val_y, output[:, 1])
         s = average_precision_score(val_y, output[:, 1])
@@ -179,11 +195,13 @@ for i in range(n_images):
 
 # -- Choose best C --
 plt.figure(figsize=(3, 2), dpi=300)
-plt.rcParams.update({
-    "xtick.labelsize": 5,
-    "ytick.labelsize": 5,
-    "axes.labelsize": 5,
-})
+plt.rcParams.update(
+    {
+        "xtick.labelsize": 5,
+        "ytick.labelsize": 5,
+        "axes.labelsize": 5,
+    }
+)
 plt.plot(scores.mean(axis=0))
 plt.xticks(np.arange(len(cs)), [f"{c:.0e}" for c in cs])
 plt.xlabel("data fit C")
@@ -210,12 +228,17 @@ def load_image_from_url(url: str) -> Image.Image:
 
 test_image = load_image_from_url(test_image_fpath)
 test_image_resized = resize_transform(test_image)
-test_image_normalized = TF.normalize(test_image_resized, mean=IMAGENET_MEAN, std=IMAGENET_STD)
+test_image_normalized = TF.normalize(
+    test_image_resized, mean=IMAGENET_MEAN, std=IMAGENET_STD
+)
 
 with torch.inference_mode():
     with torch.autocast(device_type="cuda", dtype=torch.float32):
         feats = model.get_intermediate_layers(
-            test_image_normalized.unsqueeze(0), n=range(n_layers), reshape=True, norm=True
+            test_image_normalized.unsqueeze(0),
+            n=range(n_layers),
+            reshape=True,
+            norm=True,
         )
         x = feats[-1].squeeze().detach().cpu()
         dim = x.shape[0]

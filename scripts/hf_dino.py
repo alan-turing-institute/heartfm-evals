@@ -4,6 +4,7 @@ HuggingFace DINOv3 Feature Extraction Demo
 Extracts features from an image using the DINOv3 ConvNext model via the
 HuggingFace transformers pipeline.
 """
+
 from huggingface_hub import login
 from transformers import pipeline
 from transformers.image_utils import load_image

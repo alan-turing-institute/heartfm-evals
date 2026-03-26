@@ -4,6 +4,7 @@ Dense Linear Probe: Pixel-Level Cardiac Segmentation with DINOv3 on ACDC
 Architecture: Frozen DINOv3 ViT-S/16 backbone -> multi-layer feature concatenation ->
 bilinear upsample -> per-pixel 1x1 Conv2d (4 classes: BG, RV, MYO, LV).
 """
+
 from pathlib import Path
 
 import matplotlib.patches as mpatches
@@ -27,9 +28,11 @@ from heartfm_evals.dense_linear_probe import (
     cache_features,
     dice_score,
     evaluate,
-    macro_dice as compute_macro_dice,
     overlay_labels,
     train_one_epoch,
+)
+from heartfm_evals.dense_linear_probe import (
+    macro_dice as compute_macro_dice,
 )
 
 # -- Paths --
@@ -63,7 +66,9 @@ else:
 
 print(f"Using device: {DEVICE}")
 print(f"Backbone: {MODEL_NAME} (embed_dim={EMBED_DIM}, layers={N_LAYERS})")
-print(f"Selected layers: {LAYER_INDICES} -> concat dim = {EMBED_DIM * len(LAYER_INDICES)}")
+print(
+    f"Selected layers: {LAYER_INDICES} -> concat dim = {EMBED_DIM * len(LAYER_INDICES)}"
+)
 
 
 # -- Data --
@@ -73,18 +78,20 @@ test_meta_df = pd.read_csv(ACDC_DATA_DIR / "test_metadata.csv")
 print(f"Full training set: {len(train_meta_df)} patients")
 print(f"Full test set:     {len(test_meta_df)} patients")
 if "pathology" in train_meta_df.columns:
-    print(f"\nPathology distribution (train):\n{train_meta_df['pathology'].value_counts().to_string()}")
+    print(
+        f"\nPathology distribution (train):\n{train_meta_df['pathology'].value_counts().to_string()}"
+    )
 
 if "pathology" in train_meta_df.columns:
     val_pids = (
-        train_meta_df.groupby("pathology")
-        .sample(n=2, random_state=0)["pid"]
-        .tolist()
+        train_meta_df.groupby("pathology").sample(n=2, random_state=0)["pid"].tolist()
     )
 else:
     val_pids = train_meta_df.sample(frac=0.1, random_state=0)["pid"].tolist()
 
-train_split_df = train_meta_df[~train_meta_df["pid"].isin(val_pids)].reset_index(drop=True)
+train_split_df = train_meta_df[~train_meta_df["pid"].isin(val_pids)].reset_index(
+    drop=True
+)
 val_split_df = train_meta_df[train_meta_df["pid"].isin(val_pids)].reset_index(drop=True)
 
 print(f"Train split: {len(train_split_df)} patients")
@@ -126,36 +133,49 @@ backbone.eval()
 backbone.to(DEVICE)
 for p in backbone.parameters():
     p.requires_grad = False
-print(f"Loaded {MODEL_NAME} with {sum(p.numel() for p in backbone.parameters()):,} parameters (frozen)")
+print(
+    f"Loaded {MODEL_NAME} with {sum(p.numel() for p in backbone.parameters()):,} parameters (frozen)"
+)
 
 print("Caching training features...")
 train_manifest = cache_features(
-    backbone, train_cinema, CACHE_DIR / "train",
-    layer_indices=LAYER_INDICES, device=DEVICE,
+    backbone,
+    train_cinema,
+    CACHE_DIR / "train",
+    layer_indices=LAYER_INDICES,
+    device=DEVICE,
 )
 
 print("\nCaching validation features...")
 val_manifest = cache_features(
-    backbone, val_cinema, CACHE_DIR / "val",
-    layer_indices=LAYER_INDICES, device=DEVICE,
+    backbone,
+    val_cinema,
+    CACHE_DIR / "val",
+    layer_indices=LAYER_INDICES,
+    device=DEVICE,
 )
 
 print("\nCaching test features...")
 test_manifest = cache_features(
-    backbone, test_cinema, CACHE_DIR / "test",
-    layer_indices=LAYER_INDICES, device=DEVICE,
+    backbone,
+    test_cinema,
+    CACHE_DIR / "test",
+    layer_indices=LAYER_INDICES,
+    device=DEVICE,
 )
 
-print(f"\nCached: {len(train_manifest)} train, {len(val_manifest)} val, {len(test_manifest)} test slices")
+print(
+    f"\nCached: {len(train_manifest)} train, {len(val_manifest)} val, {len(test_manifest)} test slices"
+)
 
 sample = torch.load(train_manifest[0]["path"], weights_only=True)
 print(f"Feature shape: {sample['features'].shape}")
 print(f"Label shape:   {sample['label'].shape}")
 
 expected_channels = EMBED_DIM * len(LAYER_INDICES)
-assert sample["features"].shape[0] == expected_channels, (
-    f"Expected {expected_channels} channels, got {sample['features'].shape[0]}"
-)
+assert (
+    sample["features"].shape[0] == expected_channels
+), f"Expected {expected_channels} channels, got {sample['features'].shape[0]}"
 print("Shape check passed!")
 
 
@@ -226,7 +246,9 @@ for epoch in range(1, N_EPOCHS + 1):
     else:
         epochs_no_improve += 1
         if epochs_no_improve >= PATIENCE:
-            print(f"\nEarly stopping at epoch {epoch}. Best val Dice={best_val_dice:.4f} at epoch {best_epoch}.")
+            print(
+                f"\nEarly stopping at epoch {epoch}. Best val Dice={best_val_dice:.4f} at epoch {best_epoch}."
+            )
             break
 
 probe.load_state_dict(best_state)
@@ -242,7 +264,9 @@ ax1.legend()
 ax1.grid(True, alpha=0.3)
 
 ax2.plot(history["val_macro_dice"], label="Val Macro Dice", color="tab:orange")
-ax2.axhline(best_val_dice, ls="--", color="gray", alpha=0.5, label=f"Best={best_val_dice:.4f}")
+ax2.axhline(
+    best_val_dice, ls="--", color="gray", alpha=0.5, label=f"Best={best_val_dice:.4f}"
+)
 ax2.set_xlabel("Epoch")
 ax2.set_ylabel("Macro Dice (excl. BG)")
 ax2.set_title("Validation Performance")
@@ -275,18 +299,25 @@ with torch.inference_mode():
         logits = probe(feats)
         pred = logits.argmax(dim=1).squeeze(0).cpu().numpy()
 
-        patient_dices.append({
-            "pid": entry["pid"],
-            "z_idx": entry["z_idx"],
-            "macro_dice": compute_macro_dice(pred, label),
-            **{CLASS_NAMES[c]: dice_score(pred, label, c) for c in range(NUM_CLASSES)},
-        })
+        patient_dices.append(
+            {
+                "pid": entry["pid"],
+                "z_idx": entry["z_idx"],
+                "macro_dice": compute_macro_dice(pred, label),
+                **{
+                    CLASS_NAMES[c]: dice_score(pred, label, c)
+                    for c in range(NUM_CLASSES)
+                },
+            }
+        )
 
 dice_df = pd.DataFrame(patient_dices)
 patient_summary = dice_df.groupby("pid")[["macro_dice", "RV", "MYO", "LV"]].mean()
 print("Per-patient mean Macro Dice (test set):")
 print(patient_summary.round(4).to_string())
-print(f"\nOverall mean ± std: {patient_summary['macro_dice'].mean():.4f} ± {patient_summary['macro_dice'].std():.4f}")
+print(
+    f"\nOverall mean ± std: {patient_summary['macro_dice'].mean():.4f} ± {patient_summary['macro_dice'].std():.4f}"
+)
 
 
 # -- Visualization --
@@ -312,7 +343,9 @@ with torch.inference_mode():
         pred_overlay = overlay_labels(pred, IMAGE_SIZE, IMAGE_SIZE)
 
         axes[row, 0].imshow(label, cmap="tab10", vmin=0, vmax=3)
-        axes[row, 0].set_title(f"GT Labels ({entry['pid']}, z={entry['z_idx']})", fontsize=9)
+        axes[row, 0].set_title(
+            f"GT Labels ({entry['pid']}, z={entry['z_idx']})", fontsize=9
+        )
         axes[row, 0].axis("off")
 
         axes[row, 1].imshow(gt_overlay)
@@ -320,7 +353,9 @@ with torch.inference_mode():
         axes[row, 1].axis("off")
 
         axes[row, 2].imshow(pred_overlay)
-        axes[row, 2].set_title(f"Predicted (Dice={compute_macro_dice(pred, label):.3f})", fontsize=9)
+        axes[row, 2].set_title(
+            f"Predicted (Dice={compute_macro_dice(pred, label):.3f})", fontsize=9
+        )
         axes[row, 2].axis("off")
 
 legend_patches = [

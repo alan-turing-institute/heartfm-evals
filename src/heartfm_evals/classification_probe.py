@@ -28,6 +28,7 @@ from pathlib import Path
 import numpy as np
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import (
     accuracy_score,
@@ -40,8 +41,6 @@ from sklearn.model_selection import StratifiedKFold
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 from tqdm import tqdm
-
-import torch.nn.functional as F
 
 from heartfm_evals.dense_linear_probe import preprocess_slice
 
@@ -268,6 +267,70 @@ def _extract_cinema_volume_token(
 
 
 @torch.inference_mode()
+def _extract_cinema_per_slice_tokens(
+    backbone: nn.Module,
+    sax_volume: torch.Tensor,
+    n_slices: int,
+    device: torch.device | None = None,
+    target_depth: int = CINEMA_SAX_TARGET_DEPTH,
+) -> list[torch.Tensor]:
+    """Run CineMA on one SAX volume and return a mean-pooled token per slice.
+
+    To ensure a fair comparison with DINOv3 (which extracts one CLS token per
+    2D slice), we decompose CineMA's 3D token grid into per-slice groups and
+    mean-pool each group independently.  This produces one ``(embed_dim,)``
+    vector per original slice — analogous to a CLS token — so the downstream
+    patient-level pooling (mean ED slices ⊕ mean ES slices) is identical for
+    both backbones.
+
+    Steps:
+        1. Pad/truncate the volume depth to ``target_depth`` (CineMA's expected
+           SAX depth).
+        2. Run ``backbone.feature_forward()`` → ``(1, gx*gy*gz, C)`` tokens.
+        3. Reshape tokens to the spatial grid ``(gx, gy, gz, C)``.
+        4. For each original slice ``z_idx`` (0 … n_slices-1), find the nearest
+           depth-axis index in the token grid and mean-pool the ``(gx, gy, C)``
+           spatial tokens at that depth → ``(C,)`` per-slice embedding.
+
+    Args:
+        backbone: Frozen CineMA backbone in eval mode.
+        sax_volume: ``(1, H, W, z)`` tensor in [0, 1].
+        n_slices: Number of real (non-padded) slices in the volume.
+        device: Device for inference.
+        target_depth: Expected SAX depth for CineMA (default 16).
+
+    Returns:
+        List of ``n_slices`` tensors, each of shape ``(embed_dim,)`` on CPU.
+    """
+    vol = sax_volume
+    z = int(vol.shape[-1])
+    used_depth = min(z, target_depth)
+
+    if z > target_depth:
+        vol = vol[..., :target_depth]
+    elif z < target_depth:
+        vol = F.pad(vol, (0, target_depth - z), mode="constant", value=0.0)
+
+    batch = {"sax": vol.unsqueeze(0).to(device=device, dtype=torch.float32)}
+    tokens = backbone.feature_forward(batch)["sax"]  # (1, n_tokens, C)
+
+    # Reshape to spatial grid (gx, gy, gz, C)
+    gx, gy, gz = backbone.enc_down_dict["sax"].patch_embed.grid_size
+    token_grid = tokens.squeeze(0).reshape(gx, gy, gz, -1)  # (gx, gy, gz, C)
+
+    # Map each original slice to its nearest depth index in the token grid,
+    # then mean-pool the (gx * gy) spatial tokens at that depth.
+    per_slice_tokens = []
+    for z_idx in range(n_slices):
+        src_z = min(z_idx, max(used_depth - 1, 0))
+        feat_z = int(round(src_z * (gz - 1) / max(used_depth - 1, 1)))
+        slice_token = token_grid[:, :, feat_z, :].mean(dim=(0, 1)).cpu()  # (C,)
+        per_slice_tokens.append(slice_token)
+
+    return per_slice_tokens
+
+
+@torch.inference_mode()
 def cache_cinema_cls_features(
     backbone: nn.Module,
     cinema_dataset,
@@ -299,17 +362,32 @@ def cache_cinema_cls_features(
     for sample_idx in tqdm(range(len(cinema_dataset)), desc="Caching CineMA features"):
         sample = cinema_dataset[sample_idx]
         image_3d = sample["sax_image"]  # (1, H, W, z)
+        n_slices = int(sample["n_slices"])
         pid = sample["pid"]
         is_ed = sample["is_ed"]
         frame = "ed" if is_ed else "es"
 
-        fpath = cache_dir / f"{pid}_{frame}.pt"
+        # Check if all slices for this volume are already cached
+        slice_paths = [
+            cache_dir / f"{pid}_{frame}_z{z:02d}.pt" for z in range(n_slices)
+        ]
+        all_cached = all(p.exists() for p in slice_paths)
 
-        if not fpath.exists():
-            token = _extract_cinema_volume_token(backbone, image_3d, device)
-            torch.save({"cls_token": token}, fpath)
+        if not all_cached:
+            per_slice = _extract_cinema_per_slice_tokens(
+                backbone,
+                image_3d,
+                n_slices,
+                device,
+            )
+            for _z, (token, fpath) in enumerate(
+                zip(per_slice, slice_paths, strict=True)
+            ):
+                if not fpath.exists():
+                    torch.save({"cls_token": token}, fpath)
 
-        manifest.append({"path": fpath, "pid": pid, "is_ed": is_ed})
+        for z, fpath in enumerate(slice_paths):
+            manifest.append({"path": fpath, "pid": pid, "is_ed": is_ed, "z_idx": z})
 
     return manifest
 
@@ -371,7 +449,7 @@ def cache_sam_cls_features(
             pixel_values = proc["pixel_values"].to(device)
 
             feats = sam_model.get_image_embeddings(pixel_values)  # (1, C, h, w)
-            cls_token = feats.squeeze(0).mean(dim=(1, 2)).cpu()   # (C,)
+            cls_token = feats.squeeze(0).mean(dim=(1, 2)).cpu()  # (C,)
 
             torch.save({"cls_token": cls_token}, fpath)
             manifest.append({"path": fpath, "pid": pid, "is_ed": is_ed, "z_idx": z})
@@ -465,13 +543,20 @@ def sweep_C_and_train(
     for C in tqdm(ALL_C, desc="C-sweep (CV)"):
         fold_accs = []
         for train_idx, val_idx in folds:
-            pipe = Pipeline([
-                ("scaler", StandardScaler()),
-                ("clf", LogisticRegression(
-                    solver="lbfgs", C=C,
-                    max_iter=max_iter, tol=tol,
-                )),
-            ])
+            pipe = Pipeline(
+                [
+                    ("scaler", StandardScaler()),
+                    (
+                        "clf",
+                        LogisticRegression(
+                            solver="lbfgs",
+                            C=C,
+                            max_iter=max_iter,
+                            tol=tol,
+                        ),
+                    ),
+                ]
+            )
             pipe.fit(X[train_idx], y[train_idx])
             fold_accs.append(accuracy_score(y[val_idx], pipe.predict(X[val_idx])))
 
@@ -486,13 +571,20 @@ def sweep_C_and_train(
     logger.info("Best C = %.4g (mean CV accuracy = %.4f)", best_C, best_mean_acc)
 
     # Retrain on all data with best C
-    final_pipeline = Pipeline([
-        ("scaler", StandardScaler()),
-        ("clf", LogisticRegression(
-            solver="lbfgs", C=best_C,
-            max_iter=max_iter, tol=tol,
-        )),
-    ])
+    final_pipeline = Pipeline(
+        [
+            ("scaler", StandardScaler()),
+            (
+                "clf",
+                LogisticRegression(
+                    solver="lbfgs",
+                    C=best_C,
+                    max_iter=max_iter,
+                    tol=tol,
+                ),
+            ),
+        ]
+    )
     final_pipeline.fit(X, y)
 
     return best_C, final_pipeline, sweep_results

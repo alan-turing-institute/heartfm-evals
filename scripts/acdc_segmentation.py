@@ -5,6 +5,7 @@ Adapts the foreground segmentation approach for 4-class cardiac segmentation
 (Background, Right Ventricle, Myocardium, Left Ventricle) on the ACDC cardiac
 MRI dataset using DINOv3 patch features + multinomial logistic regression.
 """
+
 import os
 import pickle
 from pathlib import Path
@@ -60,7 +61,9 @@ CLASS_COLORS = {
 # -- Load DINOv3 model --
 model = torch.hub.load(REPO_DIR, MODEL_NAME, source="local", weights=WEIGHTS_PATH)
 model.eval()
-print(f"Loaded {MODEL_NAME} with {sum(p.numel() for p in model.parameters()):,} parameters")
+print(
+    f"Loaded {MODEL_NAME} with {sum(p.numel() for p in model.parameters()):,} parameters"
+)
 
 
 # -- Load ACDC data --
@@ -83,8 +86,12 @@ test_dataset = EndDiastoleEndSystoleDataset(
     transform=transform,
 )
 
-print(f"Train dataset: {len(train_dataset)} samples ({N_TRAIN_PATIENTS} patients × 2 frames)")
-print(f"Test  dataset: {len(test_dataset)} samples ({N_TEST_PATIENTS} patients × 2 frames)")
+print(
+    f"Train dataset: {len(train_dataset)} samples ({N_TRAIN_PATIENTS} patients × 2 frames)"
+)
+print(
+    f"Test  dataset: {len(test_dataset)} samples ({N_TEST_PATIENTS} patients × 2 frames)"
+)
 
 
 # -- Helper functions --
@@ -103,7 +110,9 @@ def majority_vote_patch_labels(
     purity_threshold: float = 0.5,
 ) -> torch.Tensor:
     label_2d_long = label_2d.long()
-    patches = label_2d_long.unfold(0, patch_size, patch_size).unfold(1, patch_size, patch_size)
+    patches = label_2d_long.unfold(0, patch_size, patch_size).unfold(
+        1, patch_size, patch_size
+    )
     patches = patches.reshape(-1, patch_size * patch_size)
     patch_labels = torch.mode(patches, dim=1).values
 
@@ -218,7 +227,9 @@ with torch.inference_mode():
             patch_labels = majority_vote_patch_labels(label_2d, purity_threshold=0.5)
             img_input = preprocess_slice(image_2d)
 
-            feats = model.get_intermediate_layers(img_input, n=range(N_LAYERS), reshape=True, norm=True)
+            feats = model.get_intermediate_layers(
+                img_input, n=range(N_LAYERS), reshape=True, norm=True
+            )
             dim = feats[-1].shape[1]
             patch_feats = feats[-1].squeeze().view(dim, -1).permute(1, 0).detach().cpu()
 
@@ -241,7 +252,9 @@ print(f"Feature matrix shape : {xs.shape}")
 print(f"Label vector shape   : {ys.shape}")
 print(f"Unique patients      : {len(pid_list_train)}")
 print(f"Filtered out {(~valid_mask).sum().item()} impure patches")
-print(f"Label distribution   : {dict(zip(*np.unique(ys.numpy(), return_counts=True), strict=False))}")
+print(
+    f"Label distribution   : {dict(zip(*np.unique(ys.numpy(), return_counts=True), strict=False))}"
+)
 
 
 # -- Patient-level leave-one-out CV for C selection --
@@ -266,11 +279,16 @@ for i in range(n_patients_train):
     for j, c in enumerate(cs):
         print(f"  C={c:.2e}", end=" ")
         clf = LogisticRegression(
-            random_state=0, C=c, solver="lbfgs", max_iter=1000,
+            random_state=0,
+            C=c,
+            solver="lbfgs",
+            max_iter=1000,
         ).fit(fold_x_train, fold_y_train)
 
         preds = clf.predict(fold_x_val)
-        class_dices = [dice_score(preds, fold_y_val, c_idx) for c_idx in range(1, NUM_CLASSES)]
+        class_dices = [
+            dice_score(preds, fold_y_val, c_idx) for c_idx in range(1, NUM_CLASSES)
+        ]
         macro_dice = np.mean(class_dices)
         scores[i, j] = macro_dice
         print(f"macro Dice={macro_dice:.3f}")
@@ -297,7 +315,11 @@ print(f"Best C = {best_c:.2e} (mean macro Dice = {mean_scores[best_c_idx]:.4f})"
 
 # -- Retrain with optimal C on all training data --
 clf_final = LogisticRegression(
-    random_state=0, C=best_c, solver="lbfgs", max_iter=10000, verbose=1,
+    random_state=0,
+    C=best_c,
+    solver="lbfgs",
+    max_iter=10000,
+    verbose=1,
 ).fit(xs_np, ys_np)
 print("Final model trained.")
 
@@ -329,7 +351,9 @@ with torch.inference_mode():
             patch_labels = majority_vote_patch_labels(label_2d, purity_threshold=0.0)
             img_input = preprocess_slice(image_2d)
 
-            feats = model.get_intermediate_layers(img_input, n=range(N_LAYERS), reshape=True, norm=True)
+            feats = model.get_intermediate_layers(
+                img_input, n=range(N_LAYERS), reshape=True, norm=True
+            )
             dim = feats[-1].shape[1]
             patch_feats = feats[-1].squeeze().view(dim, -1).permute(1, 0).detach().cpu()
 
@@ -360,7 +384,9 @@ for c_idx in range(NUM_CLASSES):
     class_dices_test[CLASS_NAMES[c_idx]] = d
     print(f"  {CLASS_NAMES[c_idx]:>3s}: {d:.4f}")
 
-macro_dice_test = np.mean([class_dices_test[CLASS_NAMES[c]] for c in range(1, NUM_CLASSES)])
+macro_dice_test = np.mean(
+    [class_dices_test[CLASS_NAMES[c]] for c in range(1, NUM_CLASSES)]
+)
 print(f"\nMacro Dice (excl. BG): {macro_dice_test:.4f}")
 
 bal_acc = balanced_accuracy_score(test_ys, test_preds)
@@ -393,7 +419,9 @@ for row, slice_idx in enumerate(show_indices):
     start = slice_idx * n_patches_per_slice
     end = start + n_patches_per_slice
     pred_patches = test_preds[start:end].reshape(h_patches, w_patches)
-    pred_full = np.repeat(np.repeat(pred_patches, PATCH_SIZE, axis=0), PATCH_SIZE, axis=1)
+    pred_full = np.repeat(
+        np.repeat(pred_patches, PATCH_SIZE, axis=0), PATCH_SIZE, axis=1
+    )
     gt_overlay = overlay_labels(gt_np, IMAGE_SIZE, IMAGE_SIZE)
     pred_overlay = overlay_labels(pred_full, IMAGE_SIZE, IMAGE_SIZE)
 

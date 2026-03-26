@@ -4,6 +4,7 @@ Dense Probe: Pixel-Level Cardiac Segmentation with CineMA on ACDC
 Architecture: Frozen CineMA (SAX feature extraction) -> cached 2D slice features ->
 upsample -> small conv decoder -> class logits (BG, RV, MYO, LV).
 """
+
 from pathlib import Path
 
 import matplotlib.patches as mpatches
@@ -22,10 +23,10 @@ from tqdm import tqdm
 from heartfm_evals.dense_linear_probe import (
     CLASS_COLORS,
     CLASS_NAMES,
-    DiceLoss,
     IMAGE_SIZE,
     NUM_CLASSES,
     CachedFeatureDataset,
+    DiceLoss,
     evaluate,
     macro_dice,
     overlay_labels,
@@ -70,14 +71,14 @@ test_meta_df = pd.read_csv(ACDC_DATA_DIR / "test_metadata.csv")
 
 if "pathology" in train_meta_df.columns:
     val_pids = (
-        train_meta_df.groupby("pathology")
-        .sample(n=2, random_state=0)["pid"]
-        .tolist()
+        train_meta_df.groupby("pathology").sample(n=2, random_state=0)["pid"].tolist()
     )
 else:
     val_pids = train_meta_df.sample(frac=0.1, random_state=0)["pid"].tolist()
 
-train_split_df = train_meta_df[~train_meta_df["pid"].isin(val_pids)].reset_index(drop=True)
+train_split_df = train_meta_df[~train_meta_df["pid"].isin(val_pids)].reset_index(
+    drop=True
+)
 val_split_df = train_meta_df[train_meta_df["pid"].isin(val_pids)].reset_index(drop=True)
 
 print(f"Train split: {len(train_split_df)} patients")
@@ -123,12 +124,14 @@ for p in backbone.parameters():
 
 grid_size = backbone.enc_down_dict["sax"].patch_embed.grid_size
 embed_dim = backbone.enc_down_dict["sax"].patch_embed.proj.out_features
-print(f"Loaded CineMA pretrained backbone")
+print("Loaded CineMA pretrained backbone")
 print(f"SAX token grid: {grid_size}, embed_dim: {embed_dim}")
 
 
 @torch.inference_mode()
-def extract_cinema_sax_feature_volume(backbone, sax_volume, device, target_depth=SAX_TARGET_DEPTH):
+def extract_cinema_sax_feature_volume(
+    backbone, sax_volume, device, target_depth=SAX_TARGET_DEPTH
+):
     # sax_volume: (1, H, W, z) in [0,1]
     vol = sax_volume
     z = int(vol.shape[-1])
@@ -138,7 +141,9 @@ def extract_cinema_sax_feature_volume(backbone, sax_volume, device, target_depth
     if z < target_depth:
         vol = F.pad(vol, (0, target_depth - z), mode="constant", value=0.0)
 
-    batch = {"sax": vol.unsqueeze(0).to(device=device, dtype=torch.float32)}  # (1,1,H,W,Z)
+    batch = {
+        "sax": vol.unsqueeze(0).to(device=device, dtype=torch.float32)
+    }  # (1,1,H,W,Z)
     tokens = backbone.feature_forward(batch)["sax"]  # (1, n_tokens, C)
 
     b, n_tokens, c = tokens.shape
@@ -146,7 +151,9 @@ def extract_cinema_sax_feature_volume(backbone, sax_volume, device, target_depth
     if n_tokens != gx * gy * gz:
         raise RuntimeError(f"Unexpected token count: {n_tokens} vs grid {gx}x{gy}x{gz}")
 
-    feat_vol = tokens.reshape(b, gx, gy, gz, c).permute(0, 4, 1, 2, 3).contiguous()  # (1,C,gx,gy,gz)
+    feat_vol = (
+        tokens.reshape(b, gx, gy, gz, c).permute(0, 4, 1, 2, 3).contiguous()
+    )  # (1,C,gx,gy,gz)
     return feat_vol.squeeze(0).cpu(), z
 
 
@@ -164,7 +171,9 @@ def cache_cinema_features(backbone, cinema_dataset, cache_dir, device):
         is_ed = sample["is_ed"]
         frame = "ed" if is_ed else "es"
 
-        feat_vol, used_depth = extract_cinema_sax_feature_volume(backbone, image_3d, device)
+        feat_vol, used_depth = extract_cinema_sax_feature_volume(
+            backbone, image_3d, device
+        )
         gz = feat_vol.shape[-1]
 
         for z_idx in range(n_slices):
@@ -172,7 +181,9 @@ def cache_cinema_features(backbone, cinema_dataset, cache_dir, device):
             fpath = cache_dir / fname
 
             if fpath.exists():
-                manifest.append({"path": fpath, "pid": pid, "is_ed": is_ed, "z_idx": z_idx})
+                manifest.append(
+                    {"path": fpath, "pid": pid, "is_ed": is_ed, "z_idx": z_idx}
+                )
                 continue
 
             # Map original slice index to feature-volume depth index
@@ -189,7 +200,9 @@ def cache_cinema_features(backbone, cinema_dataset, cache_dir, device):
 
 
 print("Caching training features...")
-train_manifest = cache_cinema_features(backbone, train_cinema, CACHE_DIR / "train", DEVICE)
+train_manifest = cache_cinema_features(
+    backbone, train_cinema, CACHE_DIR / "train", DEVICE
+)
 
 print("\nCaching validation features...")
 val_manifest = cache_cinema_features(backbone, val_cinema, CACHE_DIR / "val", DEVICE)
@@ -215,11 +228,19 @@ class WeightedCombinedLoss(nn.Module):
         self.dice_weight = dice_weight
 
     def forward(self, logits, targets):
-        return self.ce_weight * self.ce(logits, targets.long()) + self.dice_weight * self.dice(logits, targets)
+        return self.ce_weight * self.ce(
+            logits, targets.long()
+        ) + self.dice_weight * self.dice(logits, targets)
 
 
 class DenseDecoderProbe(nn.Module):
-    def __init__(self, in_channels, num_classes=NUM_CLASSES, output_size=(IMAGE_SIZE, IMAGE_SIZE), hidden_dim=128):
+    def __init__(
+        self,
+        in_channels,
+        num_classes=NUM_CLASSES,
+        output_size=(IMAGE_SIZE, IMAGE_SIZE),
+        hidden_dim=128,
+    ):
         super().__init__()
         self.output_size = output_size
         self.decoder = nn.Sequential(
@@ -233,7 +254,9 @@ class DenseDecoderProbe(nn.Module):
         self.head = nn.Conv2d(hidden_dim, num_classes, kernel_size=1)
 
     def forward(self, features):
-        x = F.interpolate(features, size=self.output_size, mode="bilinear", align_corners=False)
+        x = F.interpolate(
+            features, size=self.output_size, mode="bilinear", align_corners=False
+        )
         x = self.decoder(x)
         return self.head(x)
 
@@ -254,17 +277,23 @@ for entry in train_manifest:
     y = torch.load(entry["path"], weights_only=True)["label"]
     class_counts += torch.bincount(y.long().reshape(-1), minlength=NUM_CLASSES)
 
-class_weights = class_counts.sum().float() / (NUM_CLASSES * class_counts.clamp_min(1).float())
+class_weights = class_counts.sum().float() / (
+    NUM_CLASSES * class_counts.clamp_min(1).float()
+)
 class_weights[0] = class_weights[0] * 0.5
 class_weights = class_weights / class_weights.mean()
-criterion = WeightedCombinedLoss(class_weights.to(DEVICE), ce_weight=1.0, dice_weight=1.0)
+criterion = WeightedCombinedLoss(
+    class_weights.to(DEVICE), ce_weight=1.0, dice_weight=1.0
+)
 
 optimizer = torch.optim.AdamW(probe.parameters(), lr=LR, weight_decay=WEIGHT_DECAY)
 scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=N_EPOCHS)
 
 print(f"Dense probe input channels: {in_channels}")
 print(f"Class weights (BG/RV/MYO/LV): {class_weights.tolist()}")
-print(f"Trainable params: {sum(p.numel() for p in probe.parameters() if p.requires_grad):,}")
+print(
+    f"Trainable params: {sum(p.numel() for p in probe.parameters() if p.requires_grad):,}"
+)
 
 best_val_dice = 0.0
 best_epoch = 0
@@ -294,15 +323,21 @@ for epoch in range(1, N_EPOCHS + 1):
         best_val_dice = val_dice
         best_epoch = epoch
         epochs_no_improve = 0
-        best_state = {k: v.detach().cpu().clone() for k, v in probe.state_dict().items()}
+        best_state = {
+            k: v.detach().cpu().clone() for k, v in probe.state_dict().items()
+        }
     else:
         epochs_no_improve += 1
         if epochs_no_improve >= PATIENCE:
-            print(f"Early stopping at epoch {epoch}. Best val Dice={best_val_dice:.4f} at epoch {best_epoch}.")
+            print(
+                f"Early stopping at epoch {epoch}. Best val Dice={best_val_dice:.4f} at epoch {best_epoch}."
+            )
             break
 
 probe.load_state_dict(best_state)
-print(f"Restored best checkpoint from epoch {best_epoch} (val Dice={best_val_dice:.4f})")
+print(
+    f"Restored best checkpoint from epoch {best_epoch} (val Dice={best_val_dice:.4f})"
+)
 
 fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 4), dpi=150)
 ax1.plot(history["train_loss"], label="Train Loss")
@@ -313,7 +348,9 @@ ax1.grid(True, alpha=0.3)
 ax1.legend()
 
 ax2.plot(history["val_macro_dice"], label="Val Macro Dice", color="tab:orange")
-ax2.axhline(best_val_dice, ls="--", color="gray", alpha=0.5, label=f"Best={best_val_dice:.4f}")
+ax2.axhline(
+    best_val_dice, ls="--", color="gray", alpha=0.5, label=f"Best={best_val_dice:.4f}"
+)
 ax2.set_xlabel("Epoch")
 ax2.set_ylabel("Macro Dice (excl. BG)")
 ax2.set_title("Validation Performance")
@@ -355,7 +392,9 @@ with torch.inference_mode():
         pred_overlay = overlay_labels(pred, IMAGE_SIZE, IMAGE_SIZE)
 
         axes[row, 0].imshow(label, cmap="tab10", vmin=0, vmax=3)
-        axes[row, 0].set_title(f"GT Labels ({entry['pid']}, z={entry['z_idx']})", fontsize=9)
+        axes[row, 0].set_title(
+            f"GT Labels ({entry['pid']}, z={entry['z_idx']})", fontsize=9
+        )
         axes[row, 0].axis("off")
 
         axes[row, 1].imshow(gt_overlay)
@@ -363,7 +402,9 @@ with torch.inference_mode():
         axes[row, 1].axis("off")
 
         axes[row, 2].imshow(pred_overlay)
-        axes[row, 2].set_title(f"Predicted (Dice={macro_dice(pred, label):.3f})", fontsize=9)
+        axes[row, 2].set_title(
+            f"Predicted (Dice={macro_dice(pred, label):.3f})", fontsize=9
+        )
         axes[row, 2].axis("off")
 
 legend_patches = [
