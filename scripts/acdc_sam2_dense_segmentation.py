@@ -168,7 +168,7 @@ def extract_sam2_features(sam2_model, image_processor, image_2d, device):
     pixel_values = proc["pixel_values"].to(device)
 
     feats = sam2_model.get_image_embeddings(pixel_values)
-    return feats.squeeze(0).cpu()
+    return feats[-1].squeeze(0).cpu()
 
 
 def _augment_slice(image_2d, label_2d):
