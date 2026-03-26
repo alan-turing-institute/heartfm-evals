@@ -170,16 +170,16 @@ notebooks/images/
 data/heartfm/processed/acdc/*
 
 # Model weight files in notebooks
-notebooks/*.pt
-notebooks/*.pth
+notebooks/**/*.pt
+notebooks/**/*.pth
 
 # JetBrains IDE
 .idea/
 
 # scripts
-scripts/*.pt
-scripts/*png
-scripts/*.out
+scripts/**/*.pt
+scripts/**/*.png
+scripts/**/*.out
 
 cls_feature_cache/
 linear_feature_cache/
