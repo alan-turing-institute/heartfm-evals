@@ -58,12 +58,12 @@ ACDC_DATA_DIR = Path("/home/rwood/heartfm/data-evals/acdc/")
 
 # -- SAM 2 source --
 SAM2_MODEL_ID = args.model
-HF_CACHE_DIR = Path("../model_weights/hf")
+HF_CACHE_DIR = Path("../../model_weights/hf")
 AUTO_DOWNLOAD = True
 
 # -- Cache --
 CACHE_NAME = SAM2_MODEL_ID.split("/")[-1].replace("-", "_").replace(".", "_")
-CACHE_DIR = Path(f"../feature_cache/{CACHE_NAME}")
+CACHE_DIR = Path(f"../../feature_cache/{CACHE_NAME}")
 
 # -- Training --
 BATCH_SIZE = 16

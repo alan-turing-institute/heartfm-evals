@@ -15,7 +15,7 @@ from matplotlib import colormaps
 from PIL import Image
 from torchvision.transforms import v2
 
-REPO_DIR = "../models/dinov3/"
+REPO_DIR = "../../models/dinov3/"
 sys.path.append(REPO_DIR)
 
 from dinov3.eval.segmentation.inference import make_inference
@@ -46,8 +46,8 @@ segmentor = torch.hub.load(
     REPO_DIR,
     "dinov3_vit7b16_ms",
     source="local",
-    weights="../model_weights/dinov3_vit7b16_ade20k_m2f_head-bf307cb1.pth",
-    backbone_weights="../model_weights/dinov3_vit7b16_pretrain_lvd1689m-a955f4ea.pth",
+    weights="../../model_weights/dinov3_vit7b16_ade20k_m2f_head-bf307cb1.pth",
+    backbone_weights="../../model_weights/dinov3_vit7b16_pretrain_lvd1689m-a955f4ea.pth",
 )
 
 device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")

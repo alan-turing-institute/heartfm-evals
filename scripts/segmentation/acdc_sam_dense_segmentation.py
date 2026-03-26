@@ -58,13 +58,13 @@ ACDC_DATA_DIR = Path("/home/rwood/heartfm/data-evals/acdc/")
 # -- SAM source --
 # Default behavior: auto-download from Hugging Face on first run.
 SAM_MODEL_ID = args.model
-SAM_LOCAL_DIR = None  # optional: Path("../model_weights/sam-vit-base")
-HF_CACHE_DIR = Path("../model_weights/hf")
+SAM_LOCAL_DIR = None  # optional: Path("../../model_weights/sam-vit-base")
+HF_CACHE_DIR = Path("../../model_weights/hf")
 AUTO_DOWNLOAD = True
 
 # -- Cache --
 CACHE_NAME = SAM_MODEL_ID.split("/")[-1].replace("-", "_")
-CACHE_DIR = Path(f"../feature_cache/{CACHE_NAME}")
+CACHE_DIR = Path(f"../../feature_cache/{CACHE_NAME}")
 
 # -- Training --
 BATCH_SIZE = 16

@@ -37,17 +37,17 @@ from heartfm_evals.dense_linear_probe import (
 
 # -- Paths --
 ACDC_DATA_DIR = Path("/home/rwood/heartfm/data-evals/acdc/")
-REPO_DIR = "../models/dinov3/"
+REPO_DIR = "../../models/dinov3/"
 
 # -- Backbone selection --
 MODEL_NAME = "dinov3_vits16"
-WEIGHTS_PATH = f"../model_weights/{MODEL_NAME}.pth"
+WEIGHTS_PATH = f"../../model_weights/{MODEL_NAME}.pth"
 EMBED_DIM = MODEL_CONFIGS[MODEL_NAME]["embed_dim"]
 N_LAYERS = MODEL_CONFIGS[MODEL_NAME]["n_layers"]
 LAYER_INDICES = (3, 6, 9, 11)
 
 # -- Cache --
-CACHE_DIR = Path(f"../feature_cache/{MODEL_NAME}")
+CACHE_DIR = Path(f"../../feature_cache/{MODEL_NAME}")
 
 # -- Training --
 BATCH_SIZE = 16

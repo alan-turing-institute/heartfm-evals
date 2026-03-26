@@ -37,12 +37,12 @@ from heartfm_evals.dense_linear_probe import (
 ACDC_DATA_DIR = Path("/home/rwood/heartfm/data-evals/acdc/")
 
 # -- CineMA loading --
-HF_CACHE_DIR = Path("../model_weights/hf")
+HF_CACHE_DIR = Path("../../model_weights/hf")
 AUTO_DOWNLOAD = True
 
 # -- Cache --
 CACHE_NAME = "cinema_pretrained"
-CACHE_DIR = Path(f"../feature_cache/{CACHE_NAME}")
+CACHE_DIR = Path(f"../../feature_cache/{CACHE_NAME}")
 SAX_TARGET_DEPTH = 16  # CineMA pretrained SAX depth
 
 # -- Training --
