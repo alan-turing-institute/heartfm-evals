@@ -22,6 +22,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from cinema.conv import ConvResBlock
 from cinema.segmentation.convunetr import UpsampleDecoder
+from PIL import Image
 from torch.utils.data import Dataset
 from tqdm import tqdm
 
@@ -468,6 +469,162 @@ def cache_cinema_volume_features(
 
         features_dict, padded_image, actual_slices = extract_cinema_volume_features(
             backbone, image_3d, device, target_depth
+        )
+
+        # Pad label along z
+        label, _ = _pad_volume_z(label_3d, target_depth)
+
+        save_dict: dict = {
+            "image": padded_image,  # (1, H, W, target_depth)
+            "label": label.long(),  # (1, H, W, target_depth)
+            "n_slices": actual_slices,
+        }
+        save_dict.update(features_dict)
+
+        torch.save(save_dict, fpath)
+        manifest.append(
+            {"path": fpath, "pid": pid, "is_ed": is_ed, "n_slices": actual_slices}
+        )
+
+    return manifest
+
+
+# ── SAM Feature Extraction ──────────────────────────────────────────────────────
+@torch.inference_mode()
+def extract_sam_volume_features(
+    sam_model: nn.Module,
+    processor,
+    sax_volume: torch.Tensor,
+    layer_indices: tuple[int, ...],
+    device: torch.device | None = None,
+    target_depth: int = SAX_TARGET_DEPTH,
+    grid_size: int = GRID_SIZE,
+) -> tuple[dict[str, torch.Tensor], torch.Tensor, int]:
+    """Extract per-layer SAM ViT features for a SAX volume, stacked along z.
+
+    For each slice, runs the frozen SAM vision encoder with
+    ``output_hidden_states=True`` and extracts intermediate hidden states at
+    the specified layers.  The 64x64 feature maps are downsampled to
+    *grid_size* x *grid_size* so the output is compatible with
+    ``DINOv3UNetRDecoder``.
+
+    Args:
+        sam_model: Frozen ``SamModel`` in eval mode.
+        processor: ``SamImageProcessor`` for image pre-processing.
+        sax_volume: ``(1, H, W, z)`` tensor in [0, 1].
+        layer_indices: Which intermediate ViT layers to extract.
+        device: Device for inference.
+        target_depth: Pad z to this depth.
+        grid_size: Downsample spatial dims to this size (default 12).
+
+    Returns:
+        Tuple of ``(features_dict, padded_image, n_slices)``:
+            features_dict:
+                ``{f"layer_{idx}": (embed_dim, gs, gs, target_depth)}``
+            padded_image: ``(1, H, W, target_depth)``
+            n_slices: actual number of slices before padding.
+    """
+    vol, n_slices = _pad_volume_z(sax_volume, target_depth)
+
+    per_layer: dict[int, list[torch.Tensor]] = {idx: [] for idx in layer_indices}
+
+    for z in range(target_depth):
+        image_2d = vol[0, :, :, z]  # (H, W)
+
+        # Grayscale [0,1] → uint8 → RGB PIL (same pipeline as SAM notebook)
+        img_np = (image_2d.clamp(0, 1).cpu().numpy() * 255.0).astype(np.uint8)
+        pil = Image.fromarray(img_np, mode="L").convert("RGB")
+
+        proc = processor(images=pil, return_tensors="pt")
+        pixel_values = proc["pixel_values"]
+        if device is not None:
+            pixel_values = pixel_values.to(device)
+
+        # Get intermediate hidden states from SAM vision encoder
+        enc_out = sam_model.vision_encoder(pixel_values, output_hidden_states=True)
+        hidden_states = enc_out.hidden_states  # tuple of (B, 64, 64, 768)
+
+        for idx in layer_indices:
+            feat = hidden_states[idx]  # (1, 64, 64, 768) — channels-last
+            feat = feat.permute(0, 3, 1, 2)  # (1, 768, 64, 64)
+            # Downsample to match DINOv3 grid size
+            feat = F.interpolate(
+                feat,
+                size=(grid_size, grid_size),
+                mode="bilinear",
+                align_corners=False,
+            )
+            per_layer[idx].append(feat.squeeze(0).cpu())  # (768, gs, gs)
+
+    features_dict: dict[str, torch.Tensor] = {}
+    for idx in layer_indices:
+        features_dict[f"layer_{idx}"] = torch.stack(per_layer[idx], dim=-1)
+        # shape: (embed_dim, grid_size, grid_size, target_depth)
+
+    return features_dict, vol, n_slices
+
+
+def cache_sam_volume_features(
+    sam_model: nn.Module,
+    processor,
+    cinema_dataset,
+    cache_dir: Path,
+    layer_indices: tuple[int, ...] = (2, 5, 8, 11),
+    device: torch.device | None = None,
+    target_depth: int = SAX_TARGET_DEPTH,
+    grid_size: int = GRID_SIZE,
+) -> list[dict]:
+    """Cache volume-level SAM ViT features for all patients/frames.
+
+    Saves one ``.pt`` file per patient+frame containing per-layer features,
+    the padded image, padded label, and the actual number of slices.
+
+    Args:
+        sam_model: Frozen ``SamModel`` in eval mode.
+        processor: ``SamImageProcessor`` for image pre-processing.
+        cinema_dataset: CineMA ``EndDiastoleEndSystoleDataset``.
+        cache_dir: Root cache directory.
+        layer_indices: Which intermediate ViT layers to extract.
+        device: Device for inference.
+        target_depth: Pad z to this depth.
+        grid_size: Downsample spatial dims to this size (default 12).
+
+    Returns:
+        List of dicts with keys: ``path``, ``pid``, ``is_ed``, ``n_slices``.
+    """
+    layers_tag = "layers_" + "-".join(str(i) for i in sorted(layer_indices))
+    out_dir = Path(cache_dir) / layers_tag
+    out_dir.mkdir(parents=True, exist_ok=True)
+    manifest: list[dict] = []
+
+    for sample_idx in tqdm(
+        range(len(cinema_dataset)), desc="Caching SAM volume features"
+    ):
+        sample = cinema_dataset[sample_idx]
+        image_3d = sample["sax_image"]  # (1, H, W, z)
+        label_3d = sample["sax_label"]  # (1, H, W, z)
+        n_slices = int(sample["n_slices"])
+        pid = sample["pid"]
+        is_ed = sample["is_ed"]
+        frame = "ed" if is_ed else "es"
+
+        fname = f"{pid}_{frame}.pt"
+        fpath = out_dir / fname
+
+        if fpath.exists():
+            manifest.append(
+                {"path": fpath, "pid": pid, "is_ed": is_ed, "n_slices": n_slices}
+            )
+            continue
+
+        features_dict, padded_image, actual_slices = extract_sam_volume_features(
+            sam_model,
+            processor,
+            image_3d,
+            layer_indices,
+            device,
+            target_depth,
+            grid_size,
         )
 
         # Pad label along z
