@@ -29,12 +29,14 @@ uv pip install -e .
 
 ### Running the scripts
 
-Scripts are in the `scripts/` directory. Each script runs one or more model size variants.
+Scripts are in `scripts/segmentation/`. Each script runs one or more model size variants.
 
 Redirect output to a `.out` file to capture logs:
 
 ```bash
-cd scripts/
+cd scripts/segmentation/
+
+# --- 2D dense probe (bilinear upsample + conv decoder) ---
 
 # SAM (vit-base, vit-large, vit-huge)
 bash run_sam_variants.sh > sam_variants.out
@@ -50,9 +52,20 @@ bash run_dino_variants.sh > dino_variants.out
 
 # CineMA
 bash run_cinema.sh > cinema.out
+
+# --- 3D UNetR decoder probe ---
+
+# SAM + 3D UNetR (vit-base, vit-large, vit-huge)
+bash run_sam_unetr_variants.sh > sam_unetr_variants.out
+
+# DINOv3 + 3D UNetR (vits16, vitb16, vitl16)
+bash run_dino_unetr_variants.sh > dino_unetr_variants.out
+
+# CineMA + 3D UNetR
+bash run_cinema_unetr.sh > cinema_unetr.out
 ```
 
-Each script runs the corresponding Python segmentation script and saves model checkpoints and result plots to `scripts/`.
+Each script runs the corresponding Python segmentation script and saves model checkpoints and result plots to `scripts/segmentation/`.
 
 ## Contributing
 
