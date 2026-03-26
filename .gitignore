@@ -161,18 +161,13 @@ Thumbs.db
 # models/
 model_weights/
 feature_cache/
-<<<<<<< classification-baselines
 cls_feature_cache/
 linear_feature_cache/
-=======
->>>>>>> main
 
 .vscode/
 
 notebooks/images/
-<<<<<<< classification-baselines
 data/heartfm/processed/acdc/*
-=======
 
 # Model weight files in notebooks
 notebooks/*.pt
@@ -181,4 +176,7 @@ notebooks/*.pth
 # JetBrains IDE
 .idea/
 
->>>>>>> main
+# scripts
+scripts/*.pt
+scripts/*png
+scripts/*.out
