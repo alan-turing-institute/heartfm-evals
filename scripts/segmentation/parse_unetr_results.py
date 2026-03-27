@@ -91,7 +91,11 @@ def parse_file(path: Path) -> list[dict]:
                 results.append(result)
     else:
         header = re.search(r"Running (.+)", text)
-        arch = header.group(1).strip() if header else path.stem
+        if header:
+            arch = header.group(1).strip()
+        else:
+            backbone_m = re.search(r"Backbone:\s*(\S+)", text)
+            arch = backbone_m.group(1).strip() if backbone_m else path.stem
         result = parse_block(text, arch, arch)
         if result:
             results.append(result)

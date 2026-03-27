@@ -76,7 +76,7 @@ def parse_file(path: Path) -> list[dict]:
 
 
 def main():
-    out_files = sorted(OUT_DIR.glob("*.out"))
+    out_files = sorted(p for p in OUT_DIR.glob("*.out") if "unetr" not in p.name)
     if not out_files:
         print("No .out files found.", file=sys.stderr)
         sys.exit(1)
