@@ -217,10 +217,19 @@ def build_results_dict(
 
 def main():
     args = parse_args()
-    device = detect_device(args.device)
     model_name = derive_model_name(args)
     tag = eval_mode_tag(args.eval_mode, args.freeze_backbone)
+    base_name = f"{model_name}_{tag}_{args.pooling}"
+    if args.max_patients:
+        base_name += "_smoke"
 
+    args.output_dir.mkdir(parents=True, exist_ok=True)
+    json_path = args.output_dir / f"{base_name}.json"
+    if json_path.exists():
+        print(f"Skipping: {json_path} already exists.")
+        return
+
+    device = detect_device(args.device)
     print(f"Device: {device}")
     print(f"Backbone: {args.backbone} ({model_name})")
     mode_desc = args.eval_mode if args.eval_mode == "logreg" else f"finetune (freeze={args.freeze_backbone})"
@@ -334,15 +343,11 @@ def main():
     print(f"Binary Acc: {binary_metrics['accuracy']:.4f}, F1: {binary_metrics['f1']:.4f}")
 
     # ── Save results ──
-    args.output_dir.mkdir(parents=True, exist_ok=True)
-    base_name = f"{model_name}_{tag}_{args.pooling}"
-
     results = build_results_dict(
         args, model_name, embed_dim, best_hyperparam, sweep_results,
         test_metrics, test_labels_eval, test_pids_eval,
         macro_auc, per_class_auc, binary_metrics,
     )
-    json_path = args.output_dir / f"{base_name}.json"
     json_path.write_text(json.dumps(results, indent=2))
     print(f"Saved results: {json_path}")
 

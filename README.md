@@ -25,6 +25,32 @@ source .venv/bin/activate
 uv pip install -e .
 ```
 
+### NVIDIA DGX Spark (ARM64 + Blackwell GPU)
+
+The standard PyTorch wheels from PyPI are CPU-only on ARM64. After the base install, replace torch and torchvision with CUDA-enabled nightly builds and install the required NVIDIA runtime libraries:
+
+```bash
+uv venv .venv
+source .venv/bin/activate
+uv pip install -e .
+
+# Replace CPU-only torch with CUDA-enabled nightly (cu128 supports the GB10 Blackwell GPU)
+uv pip install torch torchvision \
+    --index-url https://download.pytorch.org/whl/nightly/cu128 \
+    --prerelease=allow --no-deps --reinstall
+
+# Install NVIDIA CUDA runtime libraries
+uv pip install \
+    nvidia-cublas-cu12 nvidia-cuda-cupti-cu12 nvidia-cuda-nvrtc-cu12 \
+    nvidia-cuda-runtime-cu12 nvidia-cufft-cu12 nvidia-curand-cu12 \
+    nvidia-cusolver-cu12 nvidia-cusparse-cu12 nvidia-cusparselt-cu12 \
+    nvidia-nccl-cu12 nvidia-nvjitlink-cu12 nvidia-nvtx-cu12 \
+    --prerelease=allow
+
+# Verify
+python -c "import torch; print(torch.cuda.is_available())"  # Should print True
+```
+
 ## Usage
 
 ### Running the scripts
