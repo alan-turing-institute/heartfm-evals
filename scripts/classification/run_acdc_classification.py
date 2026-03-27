@@ -131,7 +131,7 @@ def load_backbone(args, device):
             cache_dir=str(args.hf_cache_dir),
             local_files_only=not auto_download,
         )
-        embed_dim = backbone.config.vision_config.output_channels
+        embed_dim = backbone.config.vision_config.hidden_size
 
     else:  # dinov3
         weights_path = args.dinov3_weights_path or f"model_weights/{args.dinov3_model_name}.pth"
