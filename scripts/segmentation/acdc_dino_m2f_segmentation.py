@@ -38,7 +38,7 @@ from heartfm_evals.dense_linear_probe import (
 )
 
 # -- Paths --
-ACDC_DATA_DIR = Path("/home/rwood/heartfm/data-evals/acdc/")
+ACDC_DATA_DIR = Path("/Users/lbokeria/projects/health_gc/data/heartfm/processed/acdc/")
 REPO_DIR = "../../models/dinov3/"
 sys.path.append(REPO_DIR)
 
@@ -58,7 +58,7 @@ M2F_NUM_CLASSES_ACDC = NUM_CLASSES + 1  # 4 ACDC classes + 1 void (M2F conventio
 BATCH_SIZE = 16
 LR = 1e-3
 WEIGHT_DECAY = 1e-4
-N_EPOCHS = 20
+N_EPOCHS = 1
 PATIENCE = 10
 
 # -- Device --
