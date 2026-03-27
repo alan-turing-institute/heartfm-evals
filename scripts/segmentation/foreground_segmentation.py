@@ -19,12 +19,12 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import average_precision_score, precision_recall_curve
 from tqdm import tqdm
 
-REPO_DIR = "../models/dinov3/"
+REPO_DIR = "../../models/dinov3/"
 model = torch.hub.load(
     REPO_DIR,
     "dinov3_vitb16",
     source="local",
-    weights="../model_weights/dinov3_vitb16.pth",
+    weights="../../model_weights/dinov3_vitb16.pth",
 )
 
 IMAGES_PATH = "./images/foreground_segmentation_images.tar.gz"

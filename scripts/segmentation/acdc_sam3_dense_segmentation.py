@@ -42,12 +42,12 @@ ACDC_DATA_DIR = Path("/home/rwood/heartfm/data-evals/acdc/")
 
 # -- SAM 3 source --
 SAM3_MODEL_ID = "facebook/sam3"
-HF_CACHE_DIR = Path("../model_weights/hf")
+HF_CACHE_DIR = Path("../../model_weights/hf")
 AUTO_DOWNLOAD = True
 
 # -- Cache --
 CACHE_NAME = "sam3"
-CACHE_DIR = Path(f"../feature_cache/{CACHE_NAME}")
+CACHE_DIR = Path(f"../../feature_cache/{CACHE_NAME}")
 
 # -- Training --
 BATCH_SIZE = 16

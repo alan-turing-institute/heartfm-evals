@@ -24,8 +24,8 @@ from tqdm import tqdm
 
 # -- Paths --
 ACDC_DATA_DIR = Path("/home/rwood/heartfm/data-evals/acdc/")
-REPO_DIR = "../models/dinov3/"
-WEIGHTS_PATH = "../model_weights/dinov3_vitb16.pth"
+REPO_DIR = "../../models/dinov3/"
+WEIGHTS_PATH = "../../model_weights/dinov3_vitb16.pth"
 
 # -- Scale --
 N_TRAIN_PATIENTS = 5
