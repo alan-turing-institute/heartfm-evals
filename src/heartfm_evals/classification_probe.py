@@ -2,15 +2,14 @@
 
 Supports three frozen backbones with a shared downstream protocol:
 
-    1. **DINOv3**: extract final-layer CLS token per 2D slice →
+    1. **DINOv3**: extract CLS token or GAP of patch tokens per 2D slice →
        one ``(embed_dim,)`` embedding per slice.
     2. **CineMA**: run ``feature_forward()`` on the 3D SAX volume and
-       global-mean-pool all ``(gx*gy*gz)`` spatial tokens → one
+       extract the CLS token or global-mean-pool all spatial tokens → one
        ``(embed_dim,)`` embedding per cardiac-phase volume.
-
     3. **SAM**: run ``get_image_embeddings()`` on each 2D slice (converted to
        RGB via ``SamImageProcessor``), global-average-pool the spatial feature
-       map ``(C, h, w)`` → one ``(C,)`` embedding per slice.
+       map ``(C, h, w)`` → one ``(C,)`` embedding per slice (no CLS token).
 
 DINOv3 and SAM produce one embedding per 2D slice; CineMA produces one
 embedding per 3D volume.  Patient-level features are built identically:
@@ -68,8 +67,9 @@ def extract_cls_features(
     backbone: nn.Module,
     cinema_dataset,
     device: torch.device | None = None,
+    pooling: str = "cls",
 ) -> dict[str, dict]:
-    """Extract final-layer CLS token features from all slices in a CineMA dataset.
+    """Extract DINOv3 features from all slices in a CineMA dataset.
 
     Groups features by patient ID, keeping ED and ES frames separate.
 
@@ -77,6 +77,8 @@ def extract_cls_features(
         backbone: Frozen DINOv3 backbone in eval mode.
         cinema_dataset: CineMA EndDiastoleEndSystoleDataset.
         device: Device for inference.
+        pooling: ``"cls"`` for the CLS token, ``"gap"`` for global average
+            pooling of patch tokens.
 
     Returns:
         Dict keyed by patient ID, each containing:
@@ -101,13 +103,15 @@ def extract_cls_features(
             if device is not None:
                 img = img.to(device)
 
-            # Extract final-layer CLS token
             feats = backbone.get_intermediate_layers(
                 img, n=1, return_class_token=True, norm=True
             )
             # feats is tuple of length 1: ((patch_tokens, cls_token),)
-            cls_token = feats[0][1].squeeze(0).cpu()  # (embed_dim,)
-            patient_features[pid][frame_key].append(cls_token)
+            if pooling == "cls":
+                token = feats[0][1].squeeze(0).cpu()  # (embed_dim,)
+            else:  # gap
+                token = feats[0][0].squeeze(0).mean(dim=0).cpu()  # (embed_dim,)
+            patient_features[pid][frame_key].append(token)
 
     # Stack per-patient features into tensors
     result: dict[str, dict] = {}
@@ -131,8 +135,9 @@ def cache_cls_features(
     cinema_dataset,
     cache_dir: Path,
     device: torch.device | None = None,
+    pooling: str = "cls",
 ) -> list[dict]:
-    """Extract and cache final-layer CLS tokens to disk, one .pt file per slice.
+    """Extract and cache DINOv3 features to disk, one .pt file per slice.
 
     Saves ``{"cls_token": Tensor(embed_dim,)}`` per file.  Skips files that
     already exist so the function is safe to re-run.
@@ -140,8 +145,10 @@ def cache_cls_features(
     Args:
         backbone: Frozen DINOv3 backbone in eval mode.
         cinema_dataset: CineMA EndDiastoleEndSystoleDataset.
-        cache_dir: Directory to save cached CLS tokens.
+        cache_dir: Directory to save cached features.
         device: Device for inference.
+        pooling: ``"cls"`` for the CLS token, ``"gap"`` for global average
+            pooling of patch tokens.
 
     Returns:
         Manifest — list of dicts with keys: path, pid, is_ed, z_idx.
@@ -174,9 +181,12 @@ def cache_cls_features(
             feats = backbone.get_intermediate_layers(
                 img, n=1, return_class_token=True, norm=True
             )
-            cls_token = feats[0][1].squeeze(0).cpu()  # (embed_dim,)
+            if pooling == "cls":
+                token = feats[0][1].squeeze(0).cpu()  # (embed_dim,)
+            else:  # gap
+                token = feats[0][0].squeeze(0).mean(dim=0).cpu()  # (embed_dim,)
 
-            torch.save({"cls_token": cls_token}, fpath)
+            torch.save({"cls_token": token}, fpath)
             manifest.append({"path": fpath, "pid": pid, "is_ed": is_ed, "z_idx": z})
 
     return manifest
@@ -220,6 +230,9 @@ def load_cached_cls_features(
 
 
 # ── CineMA Feature Extraction ─────────────────────────────────────────────────
+# CineMA's 3D ViT uses the full SAX depth as one patch dimension (patch_size
+# [192, 192, 16]).  16 is the conservative upper bound across training datasets
+# (MNMS 4-16, ACDC 5-11, RESCAN 8-18 slices) resampled to 10 mm z-spacing.
 CINEMA_SAX_TARGET_DEPTH = 16
 
 
@@ -229,23 +242,25 @@ def _extract_cinema_volume_token(
     sax_volume: torch.Tensor,
     device: torch.device | None = None,
     target_depth: int = CINEMA_SAX_TARGET_DEPTH,
+    pooling: str = "cls",
 ) -> torch.Tensor:
-    """Run CineMA on one SAX volume and return a single global-mean-pooled token.
-
-    Following the CineMA paper, we mean-pool **all** spatial tokens from the 3D
-    token grid into a single ``(embed_dim,)`` vector per cardiac-phase volume.
+    """Run CineMA on one SAX volume and return a single embedding.
 
     Steps:
         1. Pad/truncate the volume depth to ``target_depth`` (CineMA's expected
            SAX depth).
-        2. Run ``backbone.feature_forward()`` → ``(1, gx*gy*gz, C)`` tokens.
-        3. Mean-pool across the token dimension → ``(C,)`` embedding.
+        2. Run ``backbone.feature_forward()`` → dict with ``"cls"`` and
+           ``"sax"`` keys.
+        3. Return the CLS token or GAP of spatial tokens depending on
+           ``pooling``.
 
     Args:
         backbone: Frozen CineMA backbone in eval mode.
         sax_volume: ``(1, H, W, z)`` tensor in [0, 1].
         device: Device for inference.
         target_depth: Expected SAX depth for CineMA (default 16).
+        pooling: ``"cls"`` for the CLS token, ``"gap"`` for global average
+            pooling of spatial tokens.
 
     Returns:
         Single tensor of shape ``(embed_dim,)`` on CPU.
@@ -258,76 +273,13 @@ def _extract_cinema_volume_token(
     elif z < target_depth:
         vol = F.pad(vol, (0, target_depth - z), mode="constant", value=0.0)
 
-    # Forward pass — get all spatial tokens
     batch = {"sax": vol.unsqueeze(0).to(device=device, dtype=torch.float32)}
-    tokens = backbone.feature_forward(batch)["sax"]  # (1, n_tokens, C)
+    out = backbone.feature_forward(batch)
 
-    # Global mean-pool across all spatial tokens
-    return tokens.squeeze(0).mean(dim=0).cpu()  # (C,)
-
-
-@torch.inference_mode()
-def _extract_cinema_per_slice_tokens(
-    backbone: nn.Module,
-    sax_volume: torch.Tensor,
-    n_slices: int,
-    device: torch.device | None = None,
-    target_depth: int = CINEMA_SAX_TARGET_DEPTH,
-) -> list[torch.Tensor]:
-    """Run CineMA on one SAX volume and return a mean-pooled token per slice.
-
-    To ensure a fair comparison with DINOv3 (which extracts one CLS token per
-    2D slice), we decompose CineMA's 3D token grid into per-slice groups and
-    mean-pool each group independently.  This produces one ``(embed_dim,)``
-    vector per original slice — analogous to a CLS token — so the downstream
-    patient-level pooling (mean ED slices ⊕ mean ES slices) is identical for
-    both backbones.
-
-    Steps:
-        1. Pad/truncate the volume depth to ``target_depth`` (CineMA's expected
-           SAX depth).
-        2. Run ``backbone.feature_forward()`` → ``(1, gx*gy*gz, C)`` tokens.
-        3. Reshape tokens to the spatial grid ``(gx, gy, gz, C)``.
-        4. For each original slice ``z_idx`` (0 … n_slices-1), find the nearest
-           depth-axis index in the token grid and mean-pool the ``(gx, gy, C)``
-           spatial tokens at that depth → ``(C,)`` per-slice embedding.
-
-    Args:
-        backbone: Frozen CineMA backbone in eval mode.
-        sax_volume: ``(1, H, W, z)`` tensor in [0, 1].
-        n_slices: Number of real (non-padded) slices in the volume.
-        device: Device for inference.
-        target_depth: Expected SAX depth for CineMA (default 16).
-
-    Returns:
-        List of ``n_slices`` tensors, each of shape ``(embed_dim,)`` on CPU.
-    """
-    vol = sax_volume
-    z = int(vol.shape[-1])
-    used_depth = min(z, target_depth)
-
-    if z > target_depth:
-        vol = vol[..., :target_depth]
-    elif z < target_depth:
-        vol = F.pad(vol, (0, target_depth - z), mode="constant", value=0.0)
-
-    batch = {"sax": vol.unsqueeze(0).to(device=device, dtype=torch.float32)}
-    tokens = backbone.feature_forward(batch)["sax"]  # (1, n_tokens, C)
-
-    # Reshape to spatial grid (gx, gy, gz, C)
-    gx, gy, gz = backbone.enc_down_dict["sax"].patch_embed.grid_size
-    token_grid = tokens.squeeze(0).reshape(gx, gy, gz, -1)  # (gx, gy, gz, C)
-
-    # Map each original slice to its nearest depth index in the token grid,
-    # then mean-pool the (gx * gy) spatial tokens at that depth.
-    per_slice_tokens = []
-    for z_idx in range(n_slices):
-        src_z = min(z_idx, max(used_depth - 1, 0))
-        feat_z = int(round(src_z * (gz - 1) / max(used_depth - 1, 1)))
-        slice_token = token_grid[:, :, feat_z, :].mean(dim=(0, 1)).cpu()  # (C,)
-        per_slice_tokens.append(slice_token)
-
-    return per_slice_tokens
+    if pooling == "cls":
+        return out["cls"].squeeze(0).squeeze(0).cpu()  # (embed_dim,)
+    else:  # gap
+        return out["sax"].squeeze(0).mean(dim=0).cpu()  # (embed_dim,)
 
 
 @torch.inference_mode()
@@ -336,11 +288,12 @@ def cache_cinema_cls_features(
     cinema_dataset,
     cache_dir: Path,
     device: torch.device | None = None,
+    pooling: str = "cls",
 ) -> list[dict]:
-    """Extract and cache global-mean-pooled CineMA embeddings, one .pt per frame.
+    """Extract and cache CineMA embeddings, one .pt per frame.
 
     For each 3D SAX volume (ED or ES), runs the CineMA backbone once and
-    global-mean-pools all spatial tokens into a single ``(embed_dim,)`` vector
+    extracts a single ``(embed_dim,)`` vector via CLS token or GAP
     (see :func:`_extract_cinema_volume_token`).  Saved as
     ``{"cls_token": Tensor(embed_dim,)}`` — the same format used by
     :func:`cache_cls_features` for DINOv3 — so :func:`load_cached_cls_features`
@@ -351,6 +304,8 @@ def cache_cinema_cls_features(
         cinema_dataset: CineMA EndDiastoleEndSystoleDataset.
         cache_dir: Directory to save cached tokens.
         device: Device for inference.
+        pooling: ``"cls"`` for the CLS token, ``"gap"`` for global average
+            pooling of spatial tokens.
 
     Returns:
         Manifest — list of dicts with keys ``path``, ``pid``, ``is_ed``.
@@ -362,32 +317,17 @@ def cache_cinema_cls_features(
     for sample_idx in tqdm(range(len(cinema_dataset)), desc="Caching CineMA features"):
         sample = cinema_dataset[sample_idx]
         image_3d = sample["sax_image"]  # (1, H, W, z)
-        n_slices = int(sample["n_slices"])
         pid = sample["pid"]
         is_ed = sample["is_ed"]
         frame = "ed" if is_ed else "es"
 
-        # Check if all slices for this volume are already cached
-        slice_paths = [
-            cache_dir / f"{pid}_{frame}_z{z:02d}.pt" for z in range(n_slices)
-        ]
-        all_cached = all(p.exists() for p in slice_paths)
+        fpath = cache_dir / f"{pid}_{frame}.pt"
 
-        if not all_cached:
-            per_slice = _extract_cinema_per_slice_tokens(
-                backbone,
-                image_3d,
-                n_slices,
-                device,
-            )
-            for _z, (token, fpath) in enumerate(
-                zip(per_slice, slice_paths, strict=True)
-            ):
-                if not fpath.exists():
-                    torch.save({"cls_token": token}, fpath)
+        if not fpath.exists():
+            token = _extract_cinema_volume_token(backbone, image_3d, device, pooling=pooling)
+            torch.save({"cls_token": token}, fpath)
 
-        for z, fpath in enumerate(slice_paths):
-            manifest.append({"path": fpath, "pid": pid, "is_ed": is_ed, "z_idx": z})
+        manifest.append({"path": fpath, "pid": pid, "is_ed": is_ed})
 
     return manifest
 
