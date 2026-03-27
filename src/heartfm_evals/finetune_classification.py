@@ -60,10 +60,12 @@ def _extract_patient_feature_dinov3(
     backbone: nn.Module,
     sample: dict,
     device: torch.device,
+    pooling: str = "cls",
 ) -> torch.Tensor:
-    """Extract (2*embed_dim,) patient feature from DINOv3 backbone (differentiable)."""
+    """Extract (embed_dim,) per-frame feature from DINOv3 backbone (differentiable)."""
     image_3d = sample["sax_image"]  # (1, H, W, z)
     n_slices = int(sample["n_slices"])
+
     slice_feats = []
     for z in range(n_slices):
         image_2d = image_3d[0, :, :, z]
@@ -71,8 +73,11 @@ def _extract_patient_feature_dinov3(
         feats = backbone.get_intermediate_layers(
             img, n=1, return_class_token=True, norm=True
         )
-        cls_token = feats[0][1].squeeze(0)  # (embed_dim,)
-        slice_feats.append(cls_token)
+        if pooling == "cls":
+            token = feats[0][1].squeeze(0)  # (embed_dim,)
+        else:  # gap
+            token = feats[0][0].squeeze(0).mean(dim=0)  # (embed_dim,)
+        slice_feats.append(token)
 
     return torch.stack(slice_feats).mean(dim=0)  # (embed_dim,)
 
@@ -81,11 +86,9 @@ def _extract_patient_feature_cinema(
     backbone: nn.Module,
     sample: dict,
     device: torch.device,
+    pooling: str = "cls",
 ) -> torch.Tensor:
-    """Extract (embed_dim,) per-frame feature from CineMA backbone (differentiable).
-
-    Global-mean-pools all spatial tokens from the 3D volume into a single vector.
-    """
+    """Extract (embed_dim,) per-frame feature from CineMA backbone (differentiable)."""
     image_3d = sample["sax_image"]  # (1, H, W, z)
 
     vol = image_3d
@@ -97,9 +100,12 @@ def _extract_patient_feature_cinema(
         vol = F.pad(vol, (0, CINEMA_SAX_TARGET_DEPTH - z), mode="constant", value=0.0)
 
     batch = {"sax": vol.unsqueeze(0).to(device=device, dtype=torch.float32)}
-    tokens = backbone.feature_forward(batch)["sax"]  # (1, n_tokens, C)
+    out = backbone.feature_forward(batch)
 
-    return tokens.squeeze(0).mean(dim=0)  # (embed_dim,)
+    if pooling == "cls":
+        return out["cls"].squeeze(0).squeeze(0)  # (embed_dim,)
+    else:  # gap
+        return out["sax"].squeeze(0).mean(dim=0)  # (embed_dim,)
 
 
 def _extract_patient_feature_sam(
@@ -137,6 +143,7 @@ def extract_patient_feature(
     device: torch.device,
     backbone_type: str,
     image_processor=None,
+    pooling: str = "cls",
 ) -> torch.Tensor:
     """Extract (2*embed_dim,) patient feature by pooling ED and ES frames.
 
@@ -147,14 +154,16 @@ def extract_patient_feature(
         device: Device for inference.
         backbone_type: One of "dinov3", "cinema", "sam".
         image_processor: Required for SAM backbone.
+        pooling: ``"cls"`` for the CLS token, ``"gap"`` for global average
+            pooling. Ignored for SAM (always GAP).
 
     Returns:
         Patient feature vector of shape (2 * embed_dim,).
     """
     if backbone_type == "dinov3":
-        extract_fn = lambda s: _extract_patient_feature_dinov3(backbone, s, device)
+        extract_fn = lambda s: _extract_patient_feature_dinov3(backbone, s, device, pooling=pooling)
     elif backbone_type == "cinema":
-        extract_fn = lambda s: _extract_patient_feature_cinema(backbone, s, device)
+        extract_fn = lambda s: _extract_patient_feature_cinema(backbone, s, device, pooling=pooling)
     elif backbone_type == "sam":
         extract_fn = lambda s: _extract_patient_feature_sam(
             backbone, image_processor, s, device
@@ -218,6 +227,7 @@ def _preextract_all_features(
     device: torch.device,
     backbone_type: str,
     image_processor=None,
+    pooling: str = "cls",
 ) -> torch.Tensor:
     """Pre-extract (2*embed_dim,) features for all patients. Returns (N, 2*embed_dim)."""
     backbone.eval()
@@ -232,6 +242,7 @@ def _preextract_all_features(
             device,
             backbone_type,
             image_processor,
+            pooling=pooling,
         )
         feats.append(feat.cpu())
     return torch.stack(feats)  # (N, 2*embed_dim)
@@ -362,6 +373,7 @@ def _train_one_epoch(
     backbone_type: str,
     freeze_backbone: bool,
     image_processor=None,
+    pooling: str = "cls",
 ) -> float:
     """Train for one epoch over the given patients. Returns mean loss."""
     if freeze_backbone:
@@ -389,6 +401,7 @@ def _train_one_epoch(
                     device,
                     backbone_type,
                     image_processor,
+                    pooling=pooling,
                 )
         else:
             feat = extract_patient_feature(
@@ -398,6 +411,7 @@ def _train_one_epoch(
                 device,
                 backbone_type,
                 image_processor,
+                pooling=pooling,
             )
 
         logits = head(feat.unsqueeze(0))
@@ -421,6 +435,7 @@ def _evaluate_patients(
     device: torch.device,
     backbone_type: str,
     image_processor=None,
+    pooling: str = "cls",
 ) -> tuple[float, np.ndarray, np.ndarray]:
     """Evaluate accuracy on a set of patients.
 
@@ -444,6 +459,7 @@ def _evaluate_patients(
             device,
             backbone_type,
             image_processor,
+            pooling=pooling,
         )
         logits = head(feat.unsqueeze(0))
         pred = logits.argmax(dim=1).item()
@@ -470,6 +486,7 @@ def _train_with_lr(
     backbone_type: str,
     freeze_backbone: bool,
     image_processor=None,
+    pooling: str = "cls",
 ) -> tuple[float, dict, dict]:
     """Train with a specific LR, return best val accuracy and state dicts.
 
@@ -506,6 +523,7 @@ def _train_with_lr(
             backbone_type,
             freeze_backbone,
             image_processor,
+            pooling=pooling,
         )
         scheduler.step()
 
@@ -517,6 +535,7 @@ def _train_with_lr(
             device,
             backbone_type,
             image_processor,
+            pooling=pooling,
         )
 
         improved = ""
@@ -567,6 +586,7 @@ def finetune_sweep_and_train(
     epochs: int = DEFAULT_EPOCHS,
     patience: int = DEFAULT_PATIENCE,
     n_folds: int = 10,
+    pooling: str = "cls",
 ) -> tuple[float, nn.Module, ClassificationHead, list[dict]]:
     """Sweep LR via stratified k-fold CV, then retrain on all training data.
 
@@ -602,6 +622,7 @@ def finetune_sweep_and_train(
         backbone: Backbone (potentially fine-tuned).
         head: Trained ClassificationHead.
         sweep_results: List of dicts with keys lr, mean_cv_acc, std_cv_acc.
+        scaler: Fitted StandardScaler used during training (must be applied at eval).
     """
     all_patients = _group_samples_by_patient(cinema_dataset, pathology_map)
     labels_np = np.array([p["label"] for p in all_patients])
@@ -624,6 +645,7 @@ def finetune_sweep_and_train(
         device,
         backbone_type,
         image_processor,
+        pooling=pooling,
     )
     cached_labels = torch.tensor(labels_np, dtype=torch.long)
 
@@ -702,9 +724,10 @@ def finetune_sweep_and_train(
             backbone_type=backbone_type,
             freeze_backbone=False,
             image_processor=image_processor,
+            pooling=pooling,
         )
 
-    return best_lr, backbone, head, sweep_results
+    return best_lr, backbone, head, sweep_results, final_scaler
 
 
 @torch.no_grad()
@@ -716,6 +739,8 @@ def evaluate_finetune_classification(
     device: torch.device,
     backbone_type: str,
     image_processor=None,
+    scaler: StandardScaler | None = None,
+    pooling: str = "cls",
 ) -> dict:
     """Evaluate a fine-tuned backbone+head on a dataset.
 
@@ -751,7 +776,11 @@ def evaluate_finetune_classification(
             device,
             backbone_type,
             image_processor,
+            pooling=pooling,
         )
+        if scaler is not None:
+            feat_np = scaler.transform(feat.cpu().unsqueeze(0).numpy())
+            feat = torch.tensor(feat_np, dtype=feat.dtype, device=device).squeeze(0)
         logits = head(feat.unsqueeze(0))
         probs = torch.softmax(logits, dim=1).cpu().numpy()[0]
         pred = logits.argmax(dim=1).item()
