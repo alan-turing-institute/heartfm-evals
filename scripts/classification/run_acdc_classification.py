@@ -146,55 +146,6 @@ def load_backbone(args, device):
     return backbone, embed_dim, sam_image_processor
 
 
-def build_markdown_summary(
-    args, model_name, embed_dim, best_hyperparam, n_train, n_test,
-    test_metrics, macro_auc, binary_metrics,
-) -> str:
-    lines = []
-    lines.append("=" * 60)
-    lines.append("ACDC Pathology Classification — Summary")
-    lines.append("=" * 60)
-    lines.append(f"Backbone: {args.backbone} ({model_name})")
-    feat_desc = {
-        "cinema": "Per-slice mean-pooled spatial tokens",
-        "dinov3": "Final-layer CLS token",
-        "sam": "Global-average-pooled image encoder features",
-    }[args.backbone]
-    lines.append(f"Feature type: {feat_desc}")
-    lines.append(f"embed_dim: {embed_dim}")
-    lines.append(f"Pooling: {args.pooling}")
-    lines.append(f"Patient feature: ED-mean + ES-mean → ({2 * embed_dim},)")
-
-    if args.eval_mode == "logreg":
-        lines.append("Eval mode: Logistic Regression (frozen backbone)")
-        lines.append("Normalisation: StandardScaler (zero mean, unit variance)")
-        lines.append("Classifier: sklearn LogisticRegression (L-BFGS, L2)")
-        lines.append("Model selection: 10-fold stratified CV")
-        lines.append(f"Best C: {best_hyperparam:.4g}")
-    else:
-        ft_mode = "head only (frozen backbone)" if args.freeze_backbone else "backbone + head"
-        lines.append(f"Eval mode: Fine-tune ({ft_mode})")
-        lines.append("Optimizer: AdamW (weight_decay=1e-4)")
-        lines.append("Scheduler: CosineAnnealingLR")
-        lines.append("Model selection: 10-fold stratified CV")
-        lines.append(f"Best LR: {best_hyperparam:.4g}")
-
-    lines.append(f"Train patients: {n_train}")
-    lines.append(f"Test patients: {n_test}")
-    lines.append("\u2500" * 60)
-    lines.append("5-Way Classification:")
-    lines.append(f"Test Accuracy: {test_metrics['accuracy']:.4f}")
-    lines.append(f"Test Macro F1: {test_metrics['macro_f1']:.4f}")
-    lines.append(f"Macro ROC AUC: {macro_auc:.4f}")
-    lines.append("Binary Disease Detection:")
-    lines.append(f"Accuracy: {binary_metrics['accuracy']:.4f}")
-    lines.append(f"F1 Score: {binary_metrics['f1']:.4f}")
-    lines.append(f"Sensitivity: {binary_metrics['sensitivity']:.4f}")
-    lines.append(f"Specificity: {binary_metrics['specificity']:.4f}")
-    lines.append(f"ROC AUC: {binary_metrics['roc_auc']:.4f}")
-    lines.append("=" * 60)
-    return "\n".join(lines) + "\n"
-
 
 def build_results_dict(
     args, model_name, embed_dim, best_hyperparam, sweep_results,
@@ -300,7 +251,7 @@ def main():
 
     # ── Feature caching (logreg only) ──
     if args.eval_mode == "logreg":
-        cls_cache_dir = args.cls_cache_dir or Path(f"cls_feature_cache/{model_name}")
+        cls_cache_dir = args.cls_cache_dir or Path(f"cls_feature_cache/{model_name}/{args.pooling}")
 
         if args.backbone == "cinema":
             cache_fn = lambda m, ds, cd, dev: cache_cinema_cls_features(m, ds, cd, device=dev, pooling=args.pooling)
@@ -378,15 +329,6 @@ def main():
     # ── Save results ──
     args.output_dir.mkdir(parents=True, exist_ok=True)
     base_name = f"{model_name}_{tag}_{args.pooling}"
-
-    md_text = build_markdown_summary(
-        args, model_name, embed_dim, best_hyperparam,
-        len(train_meta_df), len(test_pids_eval),
-        test_metrics, macro_auc, binary_metrics,
-    )
-    md_path = args.output_dir / f"{base_name}.md"
-    md_path.write_text(md_text)
-    print(f"Saved summary: {md_path}")
 
     results = build_results_dict(
         args, model_name, embed_dim, best_hyperparam, sweep_results,

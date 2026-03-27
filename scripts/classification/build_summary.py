@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Build the summary table in results/classification/summary.md.
 
-Scans all .md result files (excluding summary.md itself) in the results
-directory, extracts metrics, and rebuilds the summary table.
+Scans all .json result files in the results directory, extracts metrics,
+and rebuilds the summary table.
 
 Usage:
     python scripts/classification/build_summary.py
@@ -12,7 +12,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import re
+import json
 from pathlib import Path
 
 BACKBONE_DISPLAY = {
@@ -29,81 +29,58 @@ EVAL_MODE_DISPLAY = {
 
 
 def parse_result_file(path: Path) -> dict | None:
-    """Extract metrics from a single result .md file."""
-    text = path.read_text()
+    """Extract metrics from a single result .json file."""
+    data = json.loads(path.read_text())
 
-    def find(pattern: str) -> str | None:
-        m = re.search(pattern, text)
-        return m.group(1) if m else None
-
-    backbone_raw = find(r"Backbone:\s*(\w+)")
+    cfg = data.get("config", {})
+    backbone_raw = cfg.get("backbone")
     if backbone_raw is None:
         return None
 
-    embed_dim = find(r"embed_dim:\s*(\d+)")
-
-    # Determine eval mode from filename stem (e.g. cinema_logreg, dinov3_ftfrozen)
-    stem = path.stem
-    for tag, display in EVAL_MODE_DISPLAY.items():
-        if stem.endswith(f"_{tag}"):
-            eval_mode = display
-            break
+    eval_mode_raw = cfg.get("eval_mode")
+    if eval_mode_raw == "logreg":
+        eval_mode = "logreg"
+    elif cfg.get("freeze_backbone", True):
+        eval_mode = "ft-frozen"
     else:
-        # Fallback: parse from text
-        if "Logistic Regression" in text:
-            eval_mode = "logreg"
-        elif "frozen backbone" in text.lower():
-            eval_mode = "ft-frozen"
-        else:
-            eval_mode = "ft-full"
+        eval_mode = "ft-full"
 
-    # Split into 5-way and binary sections
-    binary_section = ""
-    if "Binary Disease Detection:" in text:
-        binary_section = text[text.index("Binary Disease Detection:"):]
+    five = data.get("five_way", {})
+    roc = data.get("roc_auc", {})
+    binary = data.get("binary", {})
 
-    def find_in(section: str, pattern: str) -> str | None:
-        m = re.search(pattern, section)
-        return m.group(1) if m else None
+    def fmt(val) -> str | None:
+        return f"{val:.4f}" if val is not None else None
 
-    pooling = find(r"Pooling:\s*(cls|gap)")
-    if pooling is None:
-        # Old format: "Pooling: ED-mean + ES-mean → ..." didn't record cls/gap
-        pooling = "cls"
-
-    metrics = {
+    return {
         "backbone": BACKBONE_DISPLAY.get(backbone_raw, backbone_raw),
-        "embed_dim": embed_dim or "?",
+        "embed_dim": str(cfg.get("embed_dim", "?")),
         "eval_mode": eval_mode,
-        "pooling": pooling or "cls",
-        "five_acc": find(r"Test Accuracy:\s*([\d.]+)"),
-        "five_f1": find(r"Test Macro F1:\s*([\d.]+)"),
-        "five_auc": find(r"Macro ROC AUC:\s*([\d.]+)"),
-        "bin_acc": find_in(binary_section, r"Accuracy:\s*([\d.]+)"),
-        "bin_f1": find_in(binary_section, r"F1 Score:\s*([\d.]+)"),
-        "bin_sens": find_in(binary_section, r"Sensitivity:\s*([\d.]+)"),
-        "bin_spec": find_in(binary_section, r"Specificity:\s*([\d.]+)"),
-        "bin_auc": find_in(binary_section, r"ROC AUC:\s*([\d.]+)"),
+        "pooling": cfg.get("pooling", "cls"),
+        "five_acc": fmt(five.get("accuracy")),
+        "five_f1": fmt(five.get("macro_f1")),
+        "five_auc": fmt(roc.get("macro_auc")),
+        "bin_acc": fmt(binary.get("accuracy")),
+        "bin_f1": fmt(binary.get("f1")),
+        "bin_sens": fmt(binary.get("sensitivity")),
+        "bin_spec": fmt(binary.get("specificity")),
+        "bin_auc": fmt(binary.get("roc_auc")),
     }
-
-    return metrics
 
 
 def build_summary(results_dir: Path) -> str:
     """Build the full summary.md content."""
-    md_files = sorted(
-        p for p in results_dir.glob("*.md") if p.name != "summary.md"
-    )
+    json_files = sorted(results_dir.glob("*.json"))
 
     rows = []
-    for f in md_files:
+    for f in json_files:
         m = parse_result_file(f)
         if m:
             rows.append(m)
 
-    # Sort: backbone name, then eval mode
+    # Sort: backbone name, then eval mode, then pooling
     mode_order = {"logreg": 0, "ft-frozen": 1, "ft-full": 2}
-    rows.sort(key=lambda r: (r["backbone"], mode_order.get(r["eval_mode"], 9)))
+    rows.sort(key=lambda r: (r["backbone"], mode_order.get(r["eval_mode"], 9), r["pooling"]))
 
     header = "| Backbone | Embed Dim | Eval Mode | Pooling | 5-way Acc | 5-way F1 | 5-way AUC | Binary Acc | Binary F1 | Binary Sens | Binary Spec | Binary AUC |"
     sep = "| -------- | --------- | --------- | ------- | --------- | -------- | --------- | ---------- | --------- | ----------- | ----------- | ---------- |"
