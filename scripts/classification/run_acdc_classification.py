@@ -73,6 +73,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--sam-model-id", default="facebook/sam-vit-base")
     p.add_argument("--hf-cache-dir", type=Path, default=Path("model_weights/hf"))
     p.add_argument("--cls-cache-dir", type=Path, default=None, help="Feature cache dir (default: auto)")
+    p.add_argument("--max-patients", type=int, default=None, help="Limit number of patients (for debugging)")
     p.add_argument("--no-auto-download", action="store_true", help="Disable HF auto-download")
     return p.parse_args()
 
@@ -87,12 +88,12 @@ def detect_device(override: str | None) -> torch.device:
     return torch.device("cpu")
 
 
-def derive_model_name(backbone: str, dinov3_model_name: str) -> str:
-    if backbone == "cinema":
+def derive_model_name(args) -> str:
+    if args.backbone == "cinema":
         return "cinema_pretrained"
-    if backbone == "sam":
-        return "sam_vit_base"
-    return dinov3_model_name
+    if args.backbone == "sam":
+        return args.sam_model_id.split("/")[-1].replace("-", "_")
+    return args.dinov3_model_name
 
 
 def eval_mode_tag(eval_mode: str, freeze_backbone: bool) -> str:
@@ -134,6 +135,9 @@ def load_backbone(args, device):
 
     else:  # dinov3
         weights_path = args.dinov3_weights_path or f"model_weights/{args.dinov3_model_name}.pth"
+        if not Path(weights_path).exists():
+            print(f"Weights not found at {weights_path}, downloading from default source...")
+            weights_path = None
         backbone = torch.hub.load(
             args.dinov3_repo_dir,
             args.dinov3_model_name,
@@ -214,7 +218,7 @@ def build_results_dict(
 def main():
     args = parse_args()
     device = detect_device(args.device)
-    model_name = derive_model_name(args.backbone, args.dinov3_model_name)
+    model_name = derive_model_name(args)
     tag = eval_mode_tag(args.eval_mode, args.freeze_backbone)
 
     print(f"Device: {device}")
@@ -226,6 +230,9 @@ def main():
     # ── Load metadata and datasets ──
     train_meta_df = pd.read_csv(args.data_dir / "train_metadata.csv")
     test_meta_df = pd.read_csv(args.data_dir / "test_metadata.csv")
+    if args.max_patients:
+        train_meta_df = train_meta_df.head(args.max_patients)
+        test_meta_df = test_meta_df.head(args.max_patients)
     print(f"Train: {len(train_meta_df)} patients, Test: {len(test_meta_df)} patients")
 
     transform = ScaleIntensityd(keys="sax_image", factor=1 / 255, channel_wise=False)
