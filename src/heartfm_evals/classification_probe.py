@@ -389,8 +389,14 @@ def cache_sam_cls_features(
             proc = image_processor(images=pil, return_tensors="pt")
             pixel_values = proc["pixel_values"].to(device)
 
-            feats = sam_model.vision_encoder(pixel_values).last_hidden_state  # (1, h, w, C)
-            cls_token = feats.squeeze(0).mean(dim=(0, 1)).cpu()  # (C,)
+            ve = sam_model.vision_encoder
+            hidden = ve.patch_embed(pixel_values)
+            if ve.pos_embed is not None:
+                hidden = hidden + ve.pos_embed
+            for layer in ve.layers:
+                hidden = layer(hidden)
+            # hidden: (1, h, w, C) — before the neck projection
+            cls_token = hidden.squeeze(0).mean(dim=(0, 1)).cpu()  # (C,)
 
             torch.save({"cls_token": cls_token}, fpath)
             manifest.append({"path": fpath, "pid": pid, "is_ed": is_ed, "z_idx": z})
