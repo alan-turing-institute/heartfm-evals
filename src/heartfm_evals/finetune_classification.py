@@ -134,7 +134,7 @@ def _extract_patient_feature_sam(
         if ve.pos_embed is not None:
             hidden = hidden + ve.pos_embed
         for layer in ve.layers:
-            hidden = layer(hidden)
+            hidden = torch.utils.checkpoint.checkpoint(layer, hidden, use_reentrant=False)
         # hidden: (1, h, w, C) — before the neck projection
         cls_token = hidden.squeeze(0).mean(dim=(0, 1))  # (C,)
         slice_feats.append(cls_token)
