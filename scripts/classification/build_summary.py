@@ -56,6 +56,7 @@ def parse_result_file(path: Path) -> dict | None:
 
     return {
         "backbone": BACKBONE_DISPLAY.get(backbone_raw, backbone_raw),
+        "model_name": cfg.get("model_name", ""),
         "embed_dim": str(cfg.get("embed_dim", "?")),
         "eval_mode": eval_mode,
         "pooling": cfg.get("pooling", "cls"),
@@ -72,6 +73,7 @@ def parse_result_file(path: Path) -> dict | None:
 
 COLUMNS = [
     ("backbone", "Backbone"),
+    ("model_name", "Model"),
     ("embed_dim", "Embed Dim"),
     ("eval_mode", "Eval Mode"),
     ("pooling", "Pooling"),
