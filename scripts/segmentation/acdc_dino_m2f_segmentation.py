@@ -38,7 +38,7 @@ from heartfm_evals.dense_linear_probe import (
 )
 
 # -- Paths --
-ACDC_DATA_DIR = Path("/Users/lbokeria/projects/health_gc/data/heartfm/processed/acdc/")
+ACDC_DATA_DIR = Path("/home/rwood/heartfm/data-evals/acdc/")
 REPO_DIR = "../../models/dinov3/"
 sys.path.append(REPO_DIR)
 
@@ -191,8 +191,8 @@ class CachedM2FDataset(Dataset):
         entry = self.manifest[idx]
         data = torch.load(entry["path"], weights_only=True)
         return {
-            "decoder_output": data["decoder_output"],  # (100, 2048)
-            "pred_masks": data["pred_masks"],  # (100, H/4, W/4)
+            "decoder_output": data["decoder_output"].float(),  # (100, 2048)
+            "pred_masks": data["pred_masks"].float(),  # (100, H/4, W/4)
             "label": data["label"],  # (H, W)
             "pid": entry["pid"],
         }
@@ -370,14 +370,28 @@ print(f"Test CineMA dataset:  {len(test_cinema)} samples")
 print("\n=== Phase 1: Caching M2F features ===")
 print("Loading DINOv3 7B + Mask2Former segmentor...")
 
+# Load model architecture (no weights)
 segmentor = torch.hub.load(
     REPO_DIR,
     "dinov3_vit7b16_ms",
     source="local",
-    weights=HEAD_WEIGHTS,
-    backbone_weights=BACKBONE_WEIGHTS,
+    pretrained=False,
 )
 segmentor.eval().to(DEVICE)
+
+# Load backbone weights directly to GPU
+backbone_state = torch.load(BACKBONE_WEIGHTS, map_location=DEVICE, weights_only=True)
+segmentor.segmentation_model[0].backbone.load_state_dict(backbone_state, strict=True)
+del backbone_state
+# Load head weights directly to GPU
+head_state = torch.load(HEAD_WEIGHTS, map_location=DEVICE, weights_only=True)
+missing_keys, unexpected_keys = segmentor.load_state_dict(head_state, strict=False)
+if len([k for k in missing_keys if "backbone" not in k]) > 0:
+    raise RuntimeError(f"Missing keys: {missing_keys}")
+if len(unexpected_keys) > 0:
+    raise RuntimeError(f"Unexpected keys: {unexpected_keys}")
+del head_state
+
 for p in segmentor.parameters():
     p.requires_grad = False
 
@@ -548,8 +562,8 @@ with torch.inference_mode():
     for row, idx in enumerate(show_indices):
         entry = test_manifest[idx]
         data = torch.load(entry["path"], weights_only=True)
-        decoder_output = data["decoder_output"].unsqueeze(0).to(DEVICE)
-        pred_masks = data["pred_masks"].unsqueeze(0).to(DEVICE)
+        decoder_output = data["decoder_output"].float().unsqueeze(0).to(DEVICE)
+        pred_masks = data["pred_masks"].float().unsqueeze(0).to(DEVICE)
         label = data["label"].numpy()
 
         pred_logits = class_embed(decoder_output)
