@@ -129,8 +129,14 @@ def _extract_patient_feature_sam(
         proc = image_processor(images=pil, return_tensors="pt")
         pixel_values = proc["pixel_values"].to(device)
 
-        feats = backbone.get_image_embeddings(pixel_values)  # (1, C, h, w)
-        cls_token = feats.squeeze(0).mean(dim=(1, 2))  # (C,)
+        ve = backbone.vision_encoder
+        hidden = ve.patch_embed(pixel_values)
+        if ve.pos_embed is not None:
+            hidden = hidden + ve.pos_embed
+        for layer in ve.layers:
+            hidden = torch.utils.checkpoint.checkpoint(layer, hidden, use_reentrant=False)
+        # hidden: (1, h, w, C) — before the neck projection
+        cls_token = hidden.squeeze(0).mean(dim=(0, 1))  # (C,)
         slice_feats.append(cls_token)
 
     return torch.stack(slice_feats).mean(dim=0)  # (embed_dim,)

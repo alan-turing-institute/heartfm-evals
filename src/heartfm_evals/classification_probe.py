@@ -340,13 +340,14 @@ def cache_sam_cls_features(
     cache_dir: Path,
     device: torch.device | None = None,
 ) -> list[dict]:
-    """Extract and cache global-average-pooled SAM embeddings, one .pt per slice.
+    """Extract and cache global-average-pooled SAM vision-encoder embeddings, one .pt per slice.
 
-    For each 2D slice, runs SAM's image encoder and global-average-pools the
-    spatial feature map ``(C, h, w)`` → ``(C,)`` vector, saved as
-    ``{"cls_token": Tensor(C,)}`` so downstream functions
+    For each 2D slice, runs SAM's vision encoder (bypassing the neck) and
+    global-average-pools the spatial feature map ``(h, w, C)`` → ``(C,)``
+    vector, saved as ``{"cls_token": Tensor(C,)}`` so downstream functions
     (:func:`load_cached_cls_features`, :func:`build_patient_features`) work
-    identically across all backbones.
+    identically across all backbones.  ``C`` equals the encoder's
+    ``hidden_size`` (768 / 1024 / 1280 for base / large / huge).
 
     Args:
         sam_model: Frozen ``SamModel`` in eval mode.
@@ -388,8 +389,14 @@ def cache_sam_cls_features(
             proc = image_processor(images=pil, return_tensors="pt")
             pixel_values = proc["pixel_values"].to(device)
 
-            feats = sam_model.get_image_embeddings(pixel_values)  # (1, C, h, w)
-            cls_token = feats.squeeze(0).mean(dim=(1, 2)).cpu()  # (C,)
+            ve = sam_model.vision_encoder
+            hidden = ve.patch_embed(pixel_values)
+            if ve.pos_embed is not None:
+                hidden = hidden + ve.pos_embed
+            for layer in ve.layers:
+                hidden = layer(hidden)
+            # hidden: (1, h, w, C) — before the neck projection
+            cls_token = hidden.squeeze(0).mean(dim=(0, 1)).cpu()  # (C,)
 
             torch.save({"cls_token": cls_token}, fpath)
             manifest.append({"path": fpath, "pid": pid, "is_ed": is_ed, "z_idx": z})

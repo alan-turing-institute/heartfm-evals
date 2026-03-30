@@ -11,18 +11,14 @@ A modular package for evaluating foundation model performance on various clinica
 Install uv (https://astral.sh/uv) and then:
 
 ```bash
-uv venv .venv
-source .venv/bin/activate
-uv pip install -e .
-```
-
-From source:
-```bash
 git clone https://github.com/alan-turing-institute/heartfm-evals
 cd heartfm-evals
 uv venv .venv
 source .venv/bin/activate
-uv pip install -e .
+uv sync --all-extras
+
+# Verify
+python -c "import torch; print(torch.cuda.is_available())"  # Should print True
 ```
 
 ## Usage

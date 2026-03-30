@@ -11,7 +11,7 @@ authors = [
 ]
 description = "A modular package for evaluating foundation model performance on various clinical tasks involving cardiac MRI and CT images."
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.11,<3.14"
 classifiers = [
   "Development Status :: 1 - Planning",
   "Intended Audience :: Science/Research",
@@ -84,6 +84,7 @@ port.exclude_lines = [
   '\.\.\.',
   'if typing.TYPE_CHECKING:',
 ]
+
 
 
 
