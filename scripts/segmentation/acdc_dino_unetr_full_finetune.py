@@ -103,23 +103,16 @@ class FinetunableDINOv3UNetR(nn.Module):
         batch_size, _, _, _, depth = image.shape
         per_layer: dict[int, list[torch.Tensor]] = {idx: [] for idx in self.layer_indices}
 
-        # ImageNet normalization constants
-        imagenet_mean = torch.tensor([0.485, 0.456, 0.406], device=image.device, dtype=image.dtype)
-        imagenet_std = torch.tensor([0.229, 0.224, 0.225], device=image.device, dtype=image.dtype)
+        # ImageNet normalization constants (reshaped for broadcasting over (B, 3, H, W)).
+        imagenet_mean = torch.tensor([0.485, 0.456, 0.406], device=image.device, dtype=image.dtype).view(1, 3, 1, 1)
+        imagenet_std = torch.tensor([0.229, 0.224, 0.225], device=image.device, dtype=image.dtype).view(1, 3, 1, 1)
 
         for z in range(depth):
             slice_batch = image[:, 0, :, :, z]  # (B, H, W)
 
-            # Preprocess each slice: repeat to 3 channels + normalize
-            dino_batch_list = []
-            for i in range(batch_size):
-                slice_2d = slice_batch[i]  # (H, W)
-                # Replicate to 3 channels
-                x = slice_2d.unsqueeze(0).repeat(3, 1, 1)  # (3, H, W)
-                # Normalize: (x - mean) / std
-                x = (x - imagenet_mean[:, None, None]) / imagenet_std[:, None, None]
-                dino_batch_list.append(x.unsqueeze(0))  # (1, 3, H, W)
-            dino_batch = torch.cat(dino_batch_list, dim=0)  # (B, 3, H, W)
+            # Preprocess each slice volume-wise: repeat to 3 channels + normalize in a single tensor op
+            dino_batch = slice_batch.unsqueeze(1).repeat(1, 3, 1, 1)  # (B, 3, H, W)
+            dino_batch = (dino_batch - imagenet_mean) / imagenet_std
 
             # Extract features with inference mode disabled to allow gradient flow
             with torch.inference_mode(False):
