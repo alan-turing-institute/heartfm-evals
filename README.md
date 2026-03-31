@@ -75,6 +75,10 @@ Each script runs the corresponding Python segmentation script and saves model ch
 
 ACDC 5-way pathology classification and binary disease detection results are available in the [results spreadsheet](https://docs.google.com/spreadsheets/d/1yh8o8nqLrVV9fR_JaKjF-luf-cshnsQdGn1Awjl3Txw/edit?usp=sharing). Per-run details (per-class metrics, confusion matrices) are in the individual JSON files under `results/classification/`.
 
+### Segmentation
+
+Results are available in the [results spreadsheet](https://docs.google.com/spreadsheets/d/1SLpZTtmpmklWUBFqNTCLt8tfWfdyJW51YpjH2ch7xb0/edit?usp=sharing)
+
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for instructions on how to contribute.
