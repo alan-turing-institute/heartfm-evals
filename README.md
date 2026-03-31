@@ -73,7 +73,9 @@ Each script runs the corresponding Python segmentation script and saves model ch
 
 ### Classification
 
-ACDC 5-way pathology classification and binary disease detection results are available in the [results spreadsheet](https://docs.google.com/spreadsheets/d/1yh8o8nqLrVV9fR_JaKjF-luf-cshnsQdGn1Awjl3Txw/edit?usp=sharing). Per-run details (per-class metrics, confusion matrices) are in the individual JSON files under `results/classification/`.
+5-way patient-level pathology classification and binary disease detection on the ACDC dataset using frozen representations from CineMA, DINOv3 (ViT-S/B/L/7B), and SAM (Base/Large/Huge). Evaluation via logistic-regression linear probes and fine-tuning with cross-validated hyperparameter selection. ROC AUC is the primary comparison metric for diagnosis-style evaluation in this repo. See [scripts/classification/README.md](scripts/classification/README.md) for full details, scripts, and usage instructions.
+
+Per-run details (per-class metrics, confusion matrices) are in the individual JSON files under `results/classification/`. Aggregated results are also available in the [results spreadsheet](https://docs.google.com/spreadsheets/d/1yh8o8nqLrVV9fR_JaKjF-luf-cshnsQdGn1Awjl3Txw/edit?usp=sharing).
 
 ## Contributing
 
