@@ -14,6 +14,7 @@ Usage examples:
 from __future__ import annotations
 
 import argparse
+import glob
 import json
 from pathlib import Path
 
@@ -49,6 +50,7 @@ DINOV3_EMBED_DIMS = {
     "dinov3_vits16": 384,
     "dinov3_vitb16": 768,
     "dinov3_vitl16": 1024,
+    "dinov3_vit7b16": 4096,
 }
 
 
@@ -134,9 +136,14 @@ def load_backbone(args, device):
         embed_dim = backbone.config.vision_config.hidden_size
 
     else:  # dinov3
-        weights_path = args.dinov3_weights_path or f"model_weights/{args.dinov3_model_name}.pth"
-        if not Path(weights_path).exists():
-            print(f"Weights not found at {weights_path}, downloading from default source...")
+        if args.dinov3_weights_path:
+            weights_path = args.dinov3_weights_path
+        else:
+            # Match exact name or name with hash suffix (e.g. dinov3_vitl16-8aa4cbdd.pth)
+            candidates = glob.glob(f"model_weights/{args.dinov3_model_name}*.pth")
+            weights_path = candidates[0] if candidates else None
+        if weights_path is None or not Path(weights_path).exists():
+            print(f"Weights not found for {args.dinov3_model_name}, downloading from default source...")
             weights_path = None
         backbone = torch.hub.load(
             args.dinov3_repo_dir,

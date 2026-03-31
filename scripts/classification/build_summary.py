@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build the summary table in results/classification/summary.md.
+"""Build the summary table in results/classification/summary.csv.
 
 Scans all .json result files in the results directory, extracts metrics,
 and rebuilds the summary table.
@@ -12,6 +12,8 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import csv
+import io
 import json
 from pathlib import Path
 
@@ -54,6 +56,7 @@ def parse_result_file(path: Path) -> dict | None:
 
     return {
         "backbone": BACKBONE_DISPLAY.get(backbone_raw, backbone_raw),
+        "model_name": cfg.get("model_name", ""),
         "embed_dim": str(cfg.get("embed_dim", "?")),
         "eval_mode": eval_mode,
         "pooling": cfg.get("pooling", "cls"),
@@ -68,8 +71,25 @@ def parse_result_file(path: Path) -> dict | None:
     }
 
 
+COLUMNS = [
+    ("backbone", "Backbone"),
+    ("model_name", "Model"),
+    ("embed_dim", "Embed Dim"),
+    ("eval_mode", "Eval Mode"),
+    ("pooling", "Pooling"),
+    ("five_acc", "5-way Acc"),
+    ("five_f1", "5-way F1"),
+    ("five_auc", "5-way AUC"),
+    ("bin_acc", "Binary Acc"),
+    ("bin_f1", "Binary F1"),
+    ("bin_sens", "Binary Sens"),
+    ("bin_spec", "Binary Spec"),
+    ("bin_auc", "Binary AUC"),
+]
+
+
 def build_summary(results_dir: Path) -> str:
-    """Build the full summary.md content."""
+    """Build the full summary.csv content."""
     json_files = sorted(results_dir.glob("*.json"))
 
     rows = []
@@ -82,34 +102,12 @@ def build_summary(results_dir: Path) -> str:
     mode_order = {"logreg": 0, "ft-frozen": 1, "ft-full": 2}
     rows.sort(key=lambda r: (r["backbone"], mode_order.get(r["eval_mode"], 9), r["pooling"]))
 
-    header = "| Backbone | Embed Dim | Eval Mode | Pooling | 5-way Acc | 5-way F1 | 5-way AUC | Binary Acc | Binary F1 | Binary Sens | Binary Spec | Binary AUC |"
-    sep = "| -------- | --------- | --------- | ------- | --------- | -------- | --------- | ---------- | --------- | ----------- | ----------- | ---------- |"
-
-    table_rows = []
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow([display for _, display in COLUMNS])
     for r in rows:
-        def v(key, width):
-            val = r.get(key) or "—"
-            return f"{val:<{width}s}"
-
-        table_rows.append(
-            f"| {v('backbone', 8)} | {v('embed_dim', 9)} | {v('eval_mode', 9)} "
-            f"| {v('pooling', 7)} "
-            f"| {v('five_acc', 9)} | {v('five_f1', 8)} | {v('five_auc', 9)} "
-            f"| {v('bin_acc', 10)} | {v('bin_f1', 9)} | {v('bin_sens', 11)} "
-            f"| {v('bin_spec', 11)} | {v('bin_auc', 10)} |"
-        )
-
-    lines = [
-        "# ACDC Pathology Classification — Summary",
-        "",
-        "5-way patient-level classification (100 train / 50 test) + binary disease detection (NOR vs disease).",
-        "Per-run details (per-class metrics, confusion matrices, plots) are in the individual result files.",
-        "",
-        header,
-        sep,
-        *table_rows,
-    ]
-    return "\n".join(lines) + "\n"
+        writer.writerow([r.get(key) or "" for key, _ in COLUMNS])
+    return buf.getvalue()
 
 
 def main():
@@ -122,7 +120,7 @@ def main():
     args = p.parse_args()
 
     summary = build_summary(args.results_dir)
-    out_path = args.results_dir / "summary.md"
+    out_path = args.results_dir / "summary.csv"
     out_path.write_text(summary)
     print(summary)
     print(f"Written to {out_path}")

@@ -69,6 +69,12 @@ bash run_cinema_unetr.sh > cinema_unetr.out
 
 Each script runs the corresponding Python segmentation script and saves model checkpoints and result plots to `scripts/segmentation/`.
 
+## Results
+
+### Classification
+
+ACDC 5-way pathology classification and binary disease detection results are available in the [results spreadsheet](https://docs.google.com/spreadsheets/d/1yh8o8nqLrVV9fR_JaKjF-luf-cshnsQdGn1Awjl3Txw/edit?usp=sharing). Per-run details (per-class metrics, confusion matrices) are in the individual JSON files under `results/classification/`.
+
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for instructions on how to contribute.
