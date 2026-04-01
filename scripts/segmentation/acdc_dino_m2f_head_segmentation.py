@@ -62,7 +62,7 @@ parser.add_argument(
 args = parser.parse_args()
 
 # ── Paths ──────────────────────────────────────────────────────────────────────
-ACDC_DATA_DIR = Path("/Users/lbokeria/projects/health_gc/data/heartfm/processed/acdc/")
+ACDC_DATA_DIR = Path("/home/rwood/heartfm/data-evals/acdc/")
 REPO_DIR = "../../models/dinov3/"
 sys.path.append(REPO_DIR)
 
@@ -99,7 +99,7 @@ M2F_MODEL_CONFIGS = {
 
 # ── Constants ──────────────────────────────────────────────────────────────────
 M2F_INPUT_SIZE = 512  # M2F expects this spatial resolution
-M2F_NUM_CLASSES_ACDC = NUM_CLASSES + 1  # 4 ACDC classes + 1 void (M2F convention)
+M2F_NUM_CLASSES_ACDC = NUM_CLASSES  # M2F adds its own void/no-object class internally
 
 MODEL_NAME = args.model
 config = M2F_MODEL_CONFIGS[MODEL_NAME]
