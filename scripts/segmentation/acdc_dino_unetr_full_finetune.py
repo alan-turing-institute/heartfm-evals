@@ -213,7 +213,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--acdc-data-dir",
         type=Path,
-        default=REPO_ROOT / "data" / "acdc",
+        default=REPO_ROOT / "data" / "heartfm" / "processed" / "acdc",
         help="Path containing ACDC train/test folders and metadata CSVs (default: REPO_ROOT/data/acdc)",
     )
     parser.add_argument(

@@ -186,12 +186,21 @@ def extract_patient_feature(
 def _group_samples_by_patient(
     cinema_dataset,
     pathology_map: dict[str, str],
+    pathology_classes: dict[str, int] | None = None,
 ) -> list[dict]:
     """Group ED/ES samples from CineMA dataset by patient.
+
+    Args:
+        cinema_dataset: CineMA EndDiastoleEndSystoleDataset.
+        pathology_map: {pid: pathology_string} from metadata.
+        pathology_classes: {class_name: int_label} mapping. Defaults to ACDC classes.
 
     Returns:
         List of dicts with keys: pid, label, ed_idx, es_idx.
     """
+    if pathology_classes is None:
+        pathology_classes = PATHOLOGY_CLASSES
+
     patient_samples: dict[str, dict[str, int | None]] = defaultdict(
         lambda: {"ed_idx": None, "es_idx": None}
     )
@@ -215,7 +224,7 @@ def _group_samples_by_patient(
         patients.append(
             {
                 "pid": pid,
-                "label": PATHOLOGY_CLASSES[pathology_map[pid]],
+                "label": pathology_classes[pathology_map[pid]],
                 "ed_idx": info["ed_idx"],
                 "es_idx": info["es_idx"],
             }
@@ -593,20 +602,23 @@ def finetune_sweep_and_train(
     patience: int = DEFAULT_PATIENCE,
     n_folds: int = 10,
     pooling: str = "cls",
+    num_classes: int = NUM_PATHOLOGIES,
+    pathology_classes: dict[str, int] | None = None,
+    val_cinema_dataset=None,
+    val_pathology_map: dict[str, str] | None = None,
 ) -> tuple[float, nn.Module, ClassificationHead, list[dict]]:
-    """Sweep LR via stratified k-fold CV, then retrain on all training data.
+    """Sweep LR via stratified k-fold CV (or val split), then retrain on all training data.
 
     The LR sweep is **always performed with a frozen backbone** using
     pre-extracted features, even when ``freeze_backbone=False``.  This is
     orders of magnitude faster (one forward pass per patient instead of one
-    per patient × epoch × fold × LR) and is standard practice in transfer
+    per patient x epoch x fold x LR) and is standard practice in transfer
     learning: the frozen sweep reliably identifies the right order of
     magnitude for the learning rate, and the final unfrozen training run
     adapts from there.
 
-    When ``freeze_backbone=False``, the selected LR is then used for a
-    single end-to-end fine-tuning run on all training data with the
-    backbone unfrozen.
+    When ``val_cinema_dataset`` and ``val_pathology_map`` are provided, LR
+    selection uses the dedicated validation set instead of k-fold CV.
 
     Args:
         backbone: The backbone model (will be modified in-place if not frozen).
@@ -621,7 +633,11 @@ def finetune_sweep_and_train(
         weight_decay: AdamW weight decay (fixed).
         epochs: Max training epochs per run.
         patience: Early stopping patience.
-        n_folds: Number of stratified CV folds.
+        n_folds: Number of stratified CV folds (ignored when val data provided).
+        num_classes: Number of output classes for the classification head.
+        pathology_classes: {class_name: int_label} mapping. Defaults to ACDC classes.
+        val_cinema_dataset: Optional validation CineMA dataset.
+        val_pathology_map: Optional {pid: pathology_string} for validation.
 
     Returns:
         best_lr: Optimal learning rate from CV.
@@ -630,11 +646,16 @@ def finetune_sweep_and_train(
         sweep_results: List of dicts with keys lr, mean_cv_acc, std_cv_acc.
         scaler: Fitted StandardScaler used during training (must be applied at eval).
     """
-    all_patients = _group_samples_by_patient(cinema_dataset, pathology_map)
+    all_patients = _group_samples_by_patient(
+        cinema_dataset, pathology_map, pathology_classes=pathology_classes,
+    )
     labels_np = np.array([p["label"] for p in all_patients])
 
-    skf = StratifiedKFold(n_splits=n_folds, shuffle=True, random_state=0)
-    folds = list(skf.split(np.zeros(len(all_patients)), labels_np))
+    use_val_split = val_cinema_dataset is not None and val_pathology_map is not None
+
+    if not use_val_split:
+        skf = StratifiedKFold(n_splits=n_folds, shuffle=True, random_state=0)
+        folds = list(skf.split(np.zeros(len(all_patients)), labels_np))
 
     in_dim = 2 * embed_dim
     best_mean_acc = -1.0
@@ -642,8 +663,6 @@ def finetune_sweep_and_train(
     sweep_results: list[dict] = []
 
     # ── LR sweep: always frozen (pre-extracted features) ──────────────────
-    # Even when freeze_backbone=False, the sweep runs on cached features for
-    # speed. The frozen LR ranking is a reliable proxy for the unfrozen case.
     cached_features = _preextract_all_features(
         backbone,
         cinema_dataset,
@@ -655,18 +674,40 @@ def finetune_sweep_and_train(
     )
     cached_labels = torch.tensor(labels_np, dtype=torch.long)
 
+    if use_val_split:
+        val_patients = _group_samples_by_patient(
+            val_cinema_dataset, val_pathology_map, pathology_classes=pathology_classes,
+        )
+        val_cached_features = _preextract_all_features(
+            backbone,
+            val_cinema_dataset,
+            val_patients,
+            device,
+            backbone_type,
+            image_processor,
+            pooling=pooling,
+        )
+        val_cached_labels = torch.tensor(
+            np.array([p["label"] for p in val_patients]), dtype=torch.long,
+        )
+
     for lr in tqdm(lr_grid, desc="LR sweep (CV)"):
-        fold_accs = []
-        for train_idx, val_idx in folds:
+        if use_val_split:
             scaler = StandardScaler()
-            scaler.fit(cached_features[train_idx].numpy())
-            head = ClassificationHead(in_dim).to(device)
+            scaler.fit(cached_features.numpy())
+            train_idx = np.arange(len(all_patients))
+            val_idx_arr = np.arange(len(val_patients))
+            # Combine train+val features for _train_with_lr_cached interface
+            combined_features = torch.cat([cached_features, val_cached_features], dim=0)
+            combined_labels = torch.cat([cached_labels, val_cached_labels], dim=0)
+            val_idx_shifted = np.arange(len(all_patients), len(all_patients) + len(val_patients))
+            head = ClassificationHead(in_dim, num_classes=num_classes).to(device)
             val_acc, _ = _train_with_lr_cached(
                 head,
-                cached_features,
-                cached_labels,
-                np.array(train_idx),
-                np.array(val_idx),
+                combined_features,
+                combined_labels,
+                train_idx,
+                val_idx_shifted,
                 lr=lr,
                 weight_decay=weight_decay,
                 epochs=epochs,
@@ -674,10 +715,31 @@ def finetune_sweep_and_train(
                 device=device,
                 scaler=scaler,
             )
-            fold_accs.append(val_acc)
+            mean_acc = float(val_acc)
+            std_acc = 0.0
+        else:
+            fold_accs = []
+            for train_idx, val_idx in folds:
+                scaler = StandardScaler()
+                scaler.fit(cached_features[train_idx].numpy())
+                head = ClassificationHead(in_dim, num_classes=num_classes).to(device)
+                val_acc, _ = _train_with_lr_cached(
+                    head,
+                    cached_features,
+                    cached_labels,
+                    np.array(train_idx),
+                    np.array(val_idx),
+                    lr=lr,
+                    weight_decay=weight_decay,
+                    epochs=epochs,
+                    patience=patience,
+                    device=device,
+                    scaler=scaler,
+                )
+                fold_accs.append(val_acc)
+            mean_acc = float(np.mean(fold_accs))
+            std_acc = float(np.std(fold_accs))
 
-        mean_acc = float(np.mean(fold_accs))
-        std_acc = float(np.std(fold_accs))
         sweep_results.append({"lr": lr, "mean_cv_acc": mean_acc, "std_cv_acc": std_acc})
         logger.info("LR=%.4g → mean CV acc=%.4f ± %.4f", lr, mean_acc, std_acc)
 
@@ -693,11 +755,8 @@ def finetune_sweep_and_train(
     final_scaler.fit(cached_features.numpy())
 
     if freeze_backbone:
-        # Frozen: retrain head on cached features (fast)
-        # Train for the full epoch budget — no checkpoint selection needed
-        # since there is no held-out validation split.
         all_idx = np.arange(len(all_patients))
-        head = ClassificationHead(in_dim).to(device)
+        head = ClassificationHead(in_dim, num_classes=num_classes).to(device)
         _train_with_lr_cached(
             head,
             cached_features,
@@ -712,10 +771,7 @@ def finetune_sweep_and_train(
             scaler=final_scaler,
         )
     else:
-        # Unfrozen: single end-to-end fine-tuning run with backbone + head.
-        # Train for the full epoch budget — no checkpoint selection needed
-        # since there is no held-out validation split.
-        head = ClassificationHead(in_dim).to(device)
+        head = ClassificationHead(in_dim, num_classes=num_classes).to(device)
         _train_with_lr(
             backbone,
             head,
@@ -747,8 +803,12 @@ def evaluate_finetune_classification(
     image_processor=None,
     scaler: StandardScaler | None = None,
     pooling: str = "cls",
+    pathology_classes: dict[str, int] | None = None,
 ) -> dict:
     """Evaluate a fine-tuned backbone+head on a dataset.
+
+    Args:
+        pathology_classes: {class_name: int_label} mapping. Defaults to ACDC classes.
 
     Returns the same metric dict as classification_probe.evaluate_classification():
         accuracy, macro_f1, per_class_sensitivity,
@@ -762,10 +822,16 @@ def evaluate_finetune_classification(
         f1_score,
     )
 
+    if pathology_classes is None:
+        pathology_classes = PATHOLOGY_CLASSES
+    num_classes = len(pathology_classes)
+
     backbone.eval()
     head.eval()
 
-    patients = _group_samples_by_patient(cinema_dataset, pathology_map)
+    patients = _group_samples_by_patient(
+        cinema_dataset, pathology_map, pathology_classes=pathology_classes,
+    )
 
     all_probs = []
     all_preds = []
@@ -800,13 +866,13 @@ def evaluate_finetune_classification(
     y_prob = np.array(all_probs)
 
     acc = accuracy_score(y_true, y_pred)
-    cm = confusion_matrix(y_true, y_pred, labels=list(range(NUM_PATHOLOGIES)))
+    cm = confusion_matrix(y_true, y_pred, labels=list(range(num_classes)))
 
     per_class_sensitivity: dict[str, float] = {}
     per_class_specificity: dict[str, float] = {}
     total = cm.sum()
 
-    for cls_name, cls_idx in PATHOLOGY_CLASSES.items():
+    for cls_name, cls_idx in pathology_classes.items():
         tp = cm[cls_idx, cls_idx]
         fn = cm[cls_idx, :].sum() - tp
         fp = cm[:, cls_idx].sum() - tp
@@ -829,8 +895,8 @@ def evaluate_finetune_classification(
     report = classification_report(
         y_true,
         y_pred,
-        labels=list(range(NUM_PATHOLOGIES)),
-        target_names=list(PATHOLOGY_CLASSES.keys()),
+        labels=list(range(num_classes)),
+        target_names=list(pathology_classes.keys()),
         output_dict=True,
     )
     macro_f1 = float(f1_score(y_true, y_pred, average="macro"))
