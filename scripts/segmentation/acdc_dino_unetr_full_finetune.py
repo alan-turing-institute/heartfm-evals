@@ -333,7 +333,7 @@ def main() -> None:
     model_name = args.model
     _cfg = MODEL_CONFIGS[model_name]
     weights_path = args.weights_path or (
-        REPO_ROOT / "model_weights" / f"{model_name}.pth"
+        REPO_ROOT / "model_weights" / _cfg.get("weights_filename", f"{model_name}.pth")
     )
     embed_dim = _cfg["embed_dim"]
     n_layers = _cfg["n_layers"]

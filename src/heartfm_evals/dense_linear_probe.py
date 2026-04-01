@@ -37,6 +37,8 @@ MODEL_CONFIGS = {
         "embed_dim": 1024,
         "n_layers": 24,
         "layer_indices": (5, 11, 17, 23),
+        # vitl16 hub validates a hash in the filename; use the hashed weight file
+        "weights_filename": "dinov3_vitl16_pretrain_lvd1689m-8aa4cbdd.pth",
     },
 }
 

@@ -55,7 +55,9 @@ REPO_DIR = "../../models/dinov3/"
 # -- Backbone selection --
 MODEL_NAME = args.model
 _cfg = MODEL_CONFIGS[MODEL_NAME]
-WEIGHTS_PATH = f"../../model_weights/{MODEL_NAME}.pth"
+WEIGHTS_PATH = (
+    f"../../model_weights/{_cfg.get('weights_filename', f'{MODEL_NAME}.pth')}"
+)
 EMBED_DIM = _cfg["embed_dim"]
 N_LAYERS = _cfg["n_layers"]
 
