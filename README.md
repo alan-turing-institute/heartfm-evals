@@ -25,6 +25,43 @@ source .venv/bin/activate
 uv pip install -e .
 ```
 
+## Post-install
+
+**Only needed for training the DINOv3 M2F segmentation head.**
+
+Training the DINOv3 Mask2Former segmentation head requires a CUDA extension that is not compiled automatically during install.
+You will need to do this yourself as a one time step.
+
+1. Clone the Deformable-DETR repo:
+
+```bash
+git clone https://github.com/fundamentalvision/Deformable-DETR
+cd Deformable-DETR/models/ops
+```
+
+2. Fix deprecated PyTorch API (required for PyTorch >= 2.0):
+```bash
+sed -i 's/AT_DISPATCH_FLOATING_TYPES(value\.type()/AT_DISPATCH_FLOATING_TYPES(value.scalar_type()/g' src/cuda/ms_deform_attn_cuda.cu
+```
+
+3. Source your venv and build the extension:
+```bash
+source /path/to/heartfm-evals/.venv/bin/activate
+python setup.py build_ext --inplace
+```
+
+4. Copy the compiled extension into the dinov3 package:
+```bash
+cp MultiScaleDeformableAttention*.so \
+  "$(python -c "import dinov3, os; print(os.path.join(os.path.dirname(dinov3.__file__), 'eval/segmentation/models/utils/ops'))")"
+```
+
+5. Verify it worked:
+
+```bash
+python -c "import torch; import MultiScaleDeformableAttention; print('OK')"
+```
+
 ## Usage
 
 ### Running the scripts
