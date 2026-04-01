@@ -1,7 +1,7 @@
 """Dense linear probe for pixel-level segmentation using frozen DINOv3 features.
 
 Implements the DINOv3 paper's linear evaluation protocol for semantic segmentation:
-frozen backbone → multi-layer feature concatenation → bilinear upsample → 1×1 Conv2d.
+frozen backbone → feature extraction → Dropout2d → BatchNorm2d → 1×1 Conv2d → bilinear upsample.
 """
 
 from __future__ import annotations
@@ -130,38 +130,67 @@ class CombinedLoss(nn.Module):
 
 # ── Dense Linear Probe ────────────────────────────────────────────────────────
 class DenseLinearProbe(nn.Module):
-    """Per-pixel linear classifier on concatenated multi-layer DINOv3 features.
+    """Per-pixel linear classifier on frozen DINOv3 features.
 
-    Architecture:
-        frozen backbone → extract features from selected layers →
-        concatenate → bilinear upsample → 1×1 Conv2d → class logits
+    Matches the official DINOv3 linear evaluation protocol:
+        features → Dropout2d → BatchNorm2d → 1×1 Conv2d → bilinear upsample.
+
+    Supports selecting a subset of layers at forward time from a cache that
+    stored more layers (e.g. cache has 4 layers, probe uses only the last).
     """
 
     def __init__(
         self,
         embed_dim: int,
         num_classes: int = NUM_CLASSES,
-        layer_indices: tuple[int, ...] = (3, 6, 9, 11),
+        layer_indices: tuple[int, ...] = (11,),
+        cached_layers: tuple[int, ...] | None = None,
         output_size: tuple[int, int] = (IMAGE_SIZE, IMAGE_SIZE),
+        dropout: float = 0.1,
     ):
         super().__init__()
+        self.embed_dim = embed_dim
         self.layer_indices = layer_indices
+        self.cached_layers = (
+            cached_layers if cached_layers is not None else layer_indices
+        )
         self.output_size = output_size
+
+        # Build channel-selection indices when cache differs from probe layers
+        self._channel_indices: list[int] | None = None
+        if self.cached_layers != self.layer_indices:
+            cached_list = list(self.cached_layers)
+            indices: list[int] = []
+            for li in self.layer_indices:
+                pos = cached_list.index(li)
+                start = pos * embed_dim
+                indices.extend(range(start, start + embed_dim))
+            self._channel_indices = indices
+
         in_channels = embed_dim * len(layer_indices)
+        self.dropout = nn.Dropout2d(dropout)
+        self.batchnorm = nn.BatchNorm2d(in_channels)
         self.head = nn.Conv2d(in_channels, num_classes, kernel_size=1)
+        nn.init.normal_(self.head.weight, mean=0, std=0.01)
+        nn.init.constant_(self.head.bias, 0)
 
     def forward(self, features: torch.Tensor) -> torch.Tensor:
         """
         Args:
             features: Pre-extracted concatenated features (B, C, h, w)
-                      where C = embed_dim * n_selected_layers, h/w = patch grid.
+                      where C = embed_dim * n_cached_layers, h/w = patch grid.
         Returns:
             logits: (B, num_classes, H, W) at output_size resolution.
         """
+        if self._channel_indices is not None:
+            features = features[:, self._channel_indices]
+        x = self.dropout(features)
+        x = self.batchnorm(x)
+        x = self.head(x)
         x = F.interpolate(
-            features, size=self.output_size, mode="bilinear", align_corners=False
+            x, size=self.output_size, mode="bilinear", align_corners=False
         )
-        return self.head(x)
+        return x
 
 
 # ── Feature Extraction ─────────────────────────────────────────────────────────
