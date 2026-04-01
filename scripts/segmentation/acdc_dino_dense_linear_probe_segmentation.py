@@ -54,17 +54,18 @@ REPO_DIR = "../../models/dinov3/"
 
 # -- Backbone selection --
 MODEL_NAME = args.model
+_cfg = MODEL_CONFIGS[MODEL_NAME]
 WEIGHTS_PATH = f"../../model_weights/{MODEL_NAME}.pth"
-EMBED_DIM = MODEL_CONFIGS[MODEL_NAME]["embed_dim"]
-N_LAYERS = MODEL_CONFIGS[MODEL_NAME]["n_layers"]
+EMBED_DIM = _cfg["embed_dim"]
+N_LAYERS = _cfg["n_layers"]
 
 # -- Feature extraction layers (cached to disk) --
-LAYER_INDICES = (3, 6, 9, 11)
+LAYER_INDICES = _cfg["layer_indices"]
 
 # -- Layers used by the probe (subset of LAYER_INDICES) --
 # Default: last layer only, matching DINOv3 paper D.1 protocol.
 # Change to LAYER_INDICES to use all 4 cached layers.
-USE_LAYERS = (11,)
+USE_LAYERS = (LAYER_INDICES[-1],)
 
 # -- Cache --
 CACHE_DIR = Path(f"../../feature_cache/{MODEL_NAME}")

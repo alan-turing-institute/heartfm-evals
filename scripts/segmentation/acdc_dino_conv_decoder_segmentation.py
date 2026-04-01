@@ -51,10 +51,11 @@ REPO_DIR = "../../models/dinov3/"
 
 # -- Backbone selection --
 MODEL_NAME = args.model
+_cfg = MODEL_CONFIGS[MODEL_NAME]
 WEIGHTS_PATH = f"../../model_weights/{MODEL_NAME}.pth"
-EMBED_DIM = MODEL_CONFIGS[MODEL_NAME]["embed_dim"]
-N_LAYERS = MODEL_CONFIGS[MODEL_NAME]["n_layers"]
-LAYER_INDICES = (3, 6, 9, 11)
+EMBED_DIM = _cfg["embed_dim"]
+N_LAYERS = _cfg["n_layers"]
+LAYER_INDICES = _cfg["layer_indices"]
 
 # -- Cache --
 CACHE_DIR = Path(f"../../feature_cache/{MODEL_NAME}_decoder")

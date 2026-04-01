@@ -331,16 +331,18 @@ def main() -> None:
     args = build_parser().parse_args()
 
     model_name = args.model
+    _cfg = MODEL_CONFIGS[model_name]
     weights_path = args.weights_path or (
         REPO_ROOT / "model_weights" / f"{model_name}.pth"
     )
-    embed_dim = MODEL_CONFIGS[model_name]["embed_dim"]
-    n_layers = MODEL_CONFIGS[model_name]["n_layers"]
+    embed_dim = _cfg["embed_dim"]
+    n_layers = _cfg["n_layers"]
+    layer_indices = _cfg["layer_indices"]
     device = choose_device()
 
     print(f"Using device: {device}")
     print(f"Backbone: {model_name} (embed_dim={embed_dim}, layers={n_layers})")
-    print(f"Selected layers: {LAYER_INDICES}")
+    print(f"Selected layers: {layer_indices}")
     print(f"Decoder: UpsampleDecoder(3D) chans={DEC_CHANS}, Z-pad={args.z_pad}")
     print(
         f"Fine-tune mode: {'decoder-only' if args.freeze_backbone else 'full backbone'}"
@@ -406,13 +408,13 @@ def main() -> None:
 
     decoder = DINOv3UNetRDecoder(
         embed_dim=embed_dim,
-        layer_indices=LAYER_INDICES,
+        layer_indices=layer_indices,
         dec_chans=DEC_CHANS,
         dec_patch_size=DEC_PATCH_SIZE,
         dec_scale_factor=DEC_SCALE_FACTOR,
         num_classes=NUM_CLASSES,
     )
-    probe = FinetunableDINOv3UNetR(backbone, decoder, layer_indices=LAYER_INDICES).to(
+    probe = FinetunableDINOv3UNetR(backbone, decoder, layer_indices=layer_indices).to(
         device
     )
 
@@ -462,7 +464,7 @@ def main() -> None:
             criterion,
             optimizer,
             device,
-            layer_indices=LAYER_INDICES,
+            layer_indices=layer_indices,
         )
         scheduler.step()
 
@@ -589,7 +591,7 @@ def main() -> None:
             "model_state_dict": probe.state_dict(),
             "model_name": model_name,
             "embed_dim": embed_dim,
-            "layer_indices": LAYER_INDICES,
+            "layer_indices": layer_indices,
             "dec_chans": DEC_CHANS,
             "dec_patch_size": DEC_PATCH_SIZE,
             "dec_scale_factor": DEC_SCALE_FACTOR,

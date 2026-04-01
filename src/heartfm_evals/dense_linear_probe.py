@@ -31,9 +31,13 @@ CLASS_COLORS = {
 }
 
 MODEL_CONFIGS = {
-    "dinov3_vits16": {"embed_dim": 384, "n_layers": 12},
-    "dinov3_vitb16": {"embed_dim": 768, "n_layers": 12},
-    "dinov3_vitl16": {"embed_dim": 1024, "n_layers": 24},
+    "dinov3_vits16": {"embed_dim": 384, "n_layers": 12, "layer_indices": (3, 6, 9, 11)},
+    "dinov3_vitb16": {"embed_dim": 768, "n_layers": 12, "layer_indices": (3, 6, 9, 11)},
+    "dinov3_vitl16": {
+        "embed_dim": 1024,
+        "n_layers": 24,
+        "layer_indices": (5, 11, 17, 23),
+    },
 }
 
 _imagenet_normalize = T.Normalize(mean=IMAGENET_MEAN, std=IMAGENET_STD)
