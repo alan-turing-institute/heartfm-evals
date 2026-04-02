@@ -167,7 +167,7 @@ linear_feature_cache/
 .vscode/
 
 notebooks/images/
-data/heartfm/processed/acdc/*
+data/heartfm/processed/**/*
 
 # Model weight files in notebooks
 notebooks/**/*.pt
@@ -186,3 +186,6 @@ linear_feature_cache/
 
 # uv lock file (platform-specific, not suitable for cross-platform repos)
 uv.lock
+*.gz
+*.pt
+*.png
