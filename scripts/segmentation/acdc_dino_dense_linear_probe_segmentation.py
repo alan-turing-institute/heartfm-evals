@@ -1,9 +1,11 @@
 """
-Dense UNetR Probe: Pixel-Level Cardiac Segmentation with DINOv3 on ACDC
+Dense Linear Probe: Pixel-Level Cardiac Segmentation with DINOv3 on ACDC
 
-Architecture: Frozen DINOv3 backbone -> cached per-layer intermediate features ->
-stacked along z to form pseudo-3D volumes -> 3D UNetR decoder -> class logits
-(BG, RV, MYO, LV).
+Architecture: Frozen DINOv3 ViT backbone -> multi-layer feature extraction ->
+Dropout2d -> BatchNorm2d -> per-pixel 1x1 Conv2d -> bilinear upsample
+(4 classes: BG, RV, MYO, LV).
+
+Matches the DINOv3 paper's linear evaluation protocol (Appendix D.1).
 """
 
 import argparse
@@ -24,21 +26,19 @@ from heartfm_evals.dense_linear_probe import (
     IMAGE_SIZE,
     MODEL_CONFIGS,
     NUM_CLASSES,
+    CachedFeatureDataset,
+    CombinedLoss,
+    DenseLinearProbe,
+    cache_features,
+    dice_score,
+    evaluate,
     macro_dice,
     overlay_labels,
-)
-from heartfm_evals.dense_unetr_probe import (
-    SAX_TARGET_DEPTH,
-    CachedVolumeDataset,
-    DINOv3UNetRDecoder,
-    MaskedVolumeLoss,
-    cache_dino_volume_features,
-    evaluate_vol,
-    train_one_epoch_vol,
+    train_one_epoch,
 )
 
 parser = argparse.ArgumentParser(
-    description="Dense UNetR segmentation probe with DINOv3 on ACDC"
+    description="Dense linear probe segmentation with DINOv3 on ACDC"
 )
 parser.add_argument(
     "--model",
@@ -60,21 +60,23 @@ WEIGHTS_PATH = (
 )
 EMBED_DIM = _cfg["embed_dim"]
 N_LAYERS = _cfg["n_layers"]
+
+# -- Feature extraction layers (cached to disk) --
 LAYER_INDICES = _cfg["layer_indices"]
 
-# -- 3D UNetR decoder config (matches CineMA segmentation.yaml) --
-DEC_CHANS = (32, 64, 128, 256, 512)
-DEC_PATCH_SIZE = (2, 2, 1)
-DEC_SCALE_FACTOR = (2, 2, 1)
-Z_PAD = SAX_TARGET_DEPTH  # 16
+# -- Layers used by the probe (subset of LAYER_INDICES) --
+# Default: last layer only, matching DINOv3 paper D.1 protocol.
+# Change to LAYER_INDICES to use all 4 cached layers.
+USE_LAYERS = (LAYER_INDICES[-1],)
 
 # -- Cache --
-CACHE_DIR = Path(f"../../feature_cache/{MODEL_NAME}_unetr3d")
+CACHE_DIR = Path(f"../../feature_cache/{MODEL_NAME}")
 
 # -- Training --
-BATCH_SIZE = 4  # volumes use ~16x more memory than 2D slices
+BATCH_SIZE = 16
 LR = 1e-3
-WEIGHT_DECAY = 1e-4
+WEIGHT_DECAY = 1e-3
+DROPOUT = 0.1
 N_EPOCHS = 20
 PATIENCE = 10
 
@@ -88,13 +90,21 @@ else:
 
 print(f"Using device: {DEVICE}")
 print(f"Backbone: {MODEL_NAME} (embed_dim={EMBED_DIM}, layers={N_LAYERS})")
-print(f"Selected layers: {LAYER_INDICES}")
-print(f"Decoder: UpsampleDecoder(3D) chans={DEC_CHANS}, Z-pad={Z_PAD}")
+print(f"Cached layers: {LAYER_INDICES} -> cache dim = {EMBED_DIM * len(LAYER_INDICES)}")
+print(f"Probe layers:  {USE_LAYERS} -> probe input dim = {EMBED_DIM * len(USE_LAYERS)}")
 
 
 # -- Data --
 train_meta_df = pd.read_csv(ACDC_DATA_DIR / "train_metadata.csv")
 test_meta_df = pd.read_csv(ACDC_DATA_DIR / "test_metadata.csv")
+
+print(f"Full training set: {len(train_meta_df)} patients")
+print(f"Full test set:     {len(test_meta_df)} patients")
+if "pathology" in train_meta_df.columns:
+    print(
+        f"\nPathology distribution (train):\n"
+        f"{train_meta_df['pathology'].value_counts().to_string()}"
+    )
 
 if "pathology" in train_meta_df.columns:
     val_pids = (
@@ -111,6 +121,7 @@ val_split_df = train_meta_df[train_meta_df["pid"].isin(val_pids)].reset_index(dr
 print(f"Train split: {len(train_split_df)} patients")
 print(f"Val split:   {len(val_split_df)} patients")
 print(f"Test set:    {len(test_meta_df)} patients")
+print(f"\nVal patient IDs: {val_pids}")
 
 transform = ScaleIntensityd(keys="sax_image", factor=1 / 255, channel_wise=False)
 
@@ -140,117 +151,110 @@ print(f"Val CineMA dataset:   {len(val_cinema)} samples")
 print(f"Test CineMA dataset:  {len(test_cinema)} samples")
 
 
-# -- Load DINOv3 and Cache Volume Features --
+# -- Load DINOv3 and Cache Features --
 backbone = torch.hub.load(REPO_DIR, MODEL_NAME, source="local", weights=WEIGHTS_PATH)
 backbone.eval().to(DEVICE)
 for p in backbone.parameters():
     p.requires_grad = False
 
-print(
-    f"Loaded {MODEL_NAME} with {sum(p.numel() for p in backbone.parameters()):,} parameters (frozen)"
-)
+n_params = sum(p.numel() for p in backbone.parameters())
+print(f"Loaded {MODEL_NAME} with {n_params:,} parameters (frozen)")
 
-print("Caching training volume features...")
-train_manifest = cache_dino_volume_features(
+print("Caching training features...")
+train_manifest = cache_features(
     backbone,
     train_cinema,
     CACHE_DIR / "train",
     layer_indices=LAYER_INDICES,
     device=DEVICE,
-    target_depth=Z_PAD,
 )
 
-print("\nCaching validation volume features...")
-val_manifest = cache_dino_volume_features(
+print("\nCaching validation features...")
+val_manifest = cache_features(
     backbone,
     val_cinema,
     CACHE_DIR / "val",
     layer_indices=LAYER_INDICES,
     device=DEVICE,
-    target_depth=Z_PAD,
 )
 
-print("\nCaching test volume features...")
-test_manifest = cache_dino_volume_features(
+print("\nCaching test features...")
+test_manifest = cache_features(
     backbone,
     test_cinema,
     CACHE_DIR / "test",
     layer_indices=LAYER_INDICES,
     device=DEVICE,
-    target_depth=Z_PAD,
 )
 
+print(
+    f"\nCached: {len(train_manifest)} train, "
+    f"{len(val_manifest)} val, {len(test_manifest)} test slices"
+)
+
+# Verify cached feature shapes
 sample = torch.load(train_manifest[0]["path"], weights_only=True)
-print(f"\nCached train volumes: {len(train_manifest)}")
-print(f"Cached val volumes:   {len(val_manifest)}")
-print(f"Cached test volumes:  {len(test_manifest)}")
-print(f"Image shape:   {sample['image'].shape}")
+print(f"Feature shape: {sample['features'].shape}")
 print(f"Label shape:   {sample['label'].shape}")
-for idx in LAYER_INDICES:
-    print(f"Layer {idx} shape: {sample[f'layer_{idx}'].shape}")
-print(f"n_slices:      {sample['n_slices']}")
+
+expected_cache_channels = EMBED_DIM * len(LAYER_INDICES)
+assert sample["features"].shape[0] == expected_cache_channels, (
+    f"Expected {expected_cache_channels} cached channels, "
+    f"got {sample['features'].shape[0]}"
+)
+print(
+    f"Cache shape check passed! "
+    f"(probe will select {EMBED_DIM * len(USE_LAYERS)} channels for layers {USE_LAYERS})"
+)
 
 
-# -- Model, Loss & Training --
-train_ds = CachedVolumeDataset(train_manifest, layer_indices=LAYER_INDICES)
-val_ds = CachedVolumeDataset(val_manifest, layer_indices=LAYER_INDICES)
-test_ds = CachedVolumeDataset(test_manifest, layer_indices=LAYER_INDICES)
+# -- DataLoaders, Model, Loss, Optimizer --
+train_ds = CachedFeatureDataset(train_manifest)
+val_ds = CachedFeatureDataset(val_manifest)
+test_ds = CachedFeatureDataset(test_manifest)
 
 train_loader = DataLoader(train_ds, batch_size=BATCH_SIZE, shuffle=True, num_workers=0)
 val_loader = DataLoader(val_ds, batch_size=BATCH_SIZE, shuffle=False, num_workers=0)
 test_loader = DataLoader(test_ds, batch_size=BATCH_SIZE, shuffle=False, num_workers=0)
 
-probe = DINOv3UNetRDecoder(
+print(f"Train: {len(train_ds)} slices, {len(train_loader)} batches")
+print(f"Val:   {len(val_ds)} slices, {len(val_loader)} batches")
+print(f"Test:  {len(test_ds)} slices, {len(test_loader)} batches")
+
+probe = DenseLinearProbe(
     embed_dim=EMBED_DIM,
-    layer_indices=LAYER_INDICES,
-    dec_chans=DEC_CHANS,
-    dec_patch_size=DEC_PATCH_SIZE,
-    dec_scale_factor=DEC_SCALE_FACTOR,
     num_classes=NUM_CLASSES,
+    layer_indices=USE_LAYERS,
+    cached_layers=LAYER_INDICES,
+    dropout=DROPOUT,
 ).to(DEVICE)
 
-class_counts = torch.zeros(NUM_CLASSES, dtype=torch.long)
-for entry in train_manifest:
-    data = torch.load(entry["path"], weights_only=True)
-    ns = data["n_slices"]
-    label_valid = data["label"][0, :, :, :ns]  # only valid slices
-    class_counts += torch.bincount(label_valid.reshape(-1), minlength=NUM_CLASSES)
-
-class_weights = class_counts.sum().float() / (
-    NUM_CLASSES * class_counts.clamp_min(1).float()
-)
-class_weights[0] = class_weights[0] * 0.5  # reduce BG weight
-class_weights = class_weights / class_weights.mean()
-
-criterion = MaskedVolumeLoss(class_weights.to(DEVICE), ce_weight=1.0, dice_weight=1.0)
+criterion = CombinedLoss(ce_weight=1.0, dice_weight=1.0)
 optimizer = torch.optim.AdamW(probe.parameters(), lr=LR, weight_decay=WEIGHT_DECAY)
 scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=N_EPOCHS)
 
-print(
-    f"Decoder config: chans={DEC_CHANS}, patch_size={DEC_PATCH_SIZE}, scale_factor={DEC_SCALE_FACTOR}"
-)
-print(f"Class weights (BG/RV/MYO/LV): {class_weights.tolist()}")
-print(
-    f"Trainable params: {sum(p.numel() for p in probe.parameters() if p.requires_grad):,}"
-)
+n_trainable = sum(p.numel() for p in probe.parameters() if p.requires_grad)
+print(f"Dense linear probe: {n_trainable:,} trainable parameters (includes BN + Conv)")
+print("Loss: CE + Dice")
+print(f"Optimizer: AdamW (lr={LR}, wd={WEIGHT_DECAY})")
+print(f"Scheduler: CosineAnnealing (T_max={N_EPOCHS})")
 
+
+# -- Training Loop --
 best_val_dice = 0.0
 best_epoch = 0
 epochs_no_improve = 0
-history = {"train_loss": [], "val_macro_dice": [], "lr": []}
+history: dict[str, list[float]] = {
+    "train_loss": [],
+    "val_macro_dice": [],
+    "lr": [],
+}
 
 for epoch in range(1, N_EPOCHS + 1):
-    train_loss = train_one_epoch_vol(
-        probe,
-        train_loader,
-        criterion,
-        optimizer,
-        DEVICE,
-        layer_indices=LAYER_INDICES,
-    )
+    train_loss = train_one_epoch(probe, train_loader, criterion, optimizer, DEVICE)
     scheduler.step()
 
-    val_metrics = evaluate_vol(probe, val_loader, DEVICE, layer_indices=LAYER_INDICES)
+    val_metrics = evaluate(probe, val_loader, DEVICE)
     val_dice = val_metrics["macro_dice"]
 
     history["train_loss"].append(train_loss)
@@ -260,9 +264,10 @@ for epoch in range(1, N_EPOCHS + 1):
     improved = val_dice > best_val_dice
     if epoch == 1 or epoch % 5 == 0 or improved:
         tag = " *" if improved else ""
+        lr = optimizer.param_groups[0]["lr"]
         print(
-            f"Epoch {epoch:3d}/{N_EPOCHS} | loss={train_loss:.4f} | val Dice={val_dice:.4f} | "
-            f"lr={optimizer.param_groups[0]['lr']:.2e}{tag}"
+            f"Epoch {epoch:3d}/{N_EPOCHS} | loss={train_loss:.4f} "
+            f"| val Dice={val_dice:.4f} | lr={lr:.2e}{tag}"
         )
 
     if improved:
@@ -276,23 +281,25 @@ for epoch in range(1, N_EPOCHS + 1):
         epochs_no_improve += 1
         if epochs_no_improve >= PATIENCE:
             print(
-                f"Early stopping at epoch {epoch}. "
+                f"\nEarly stopping at epoch {epoch}. "
                 f"Best val Dice={best_val_dice:.4f} at epoch {best_epoch}."
             )
             break
 
 probe.load_state_dict(best_state)
 print(
-    f"Restored best checkpoint from epoch {best_epoch} (val Dice={best_val_dice:.4f})"
+    f"\nRestored best checkpoint from epoch {best_epoch} (val Dice={best_val_dice:.4f})"
 )
 
+# -- Training Curves --
 fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 4), dpi=150)
+
 ax1.plot(history["train_loss"], label="Train Loss")
 ax1.set_xlabel("Epoch")
-ax1.set_ylabel("Loss (masked CE + Dice)")
+ax1.set_ylabel("Loss (CE + Dice)")
 ax1.set_title("Training Loss")
-ax1.grid(True, alpha=0.3)
 ax1.legend()
+ax1.grid(True, alpha=0.3)
 
 ax2.plot(history["val_macro_dice"], label="Val Macro Dice", color="tab:orange")
 ax2.axhline(
@@ -301,22 +308,59 @@ ax2.axhline(
 ax2.set_xlabel("Epoch")
 ax2.set_ylabel("Macro Dice (excl. BG)")
 ax2.set_title("Validation Performance")
-ax2.grid(True, alpha=0.3)
 ax2.legend()
+ax2.grid(True, alpha=0.3)
 
 plt.tight_layout()
-plt.savefig(f"{MODEL_NAME}_unetr3d_training_curves.png", dpi=150)
+plt.savefig(f"dino_linear_probe_{MODEL_NAME}_training_curves.png", dpi=150)
 plt.close()
 
 
 # -- Test Evaluation --
-test_metrics = evaluate_vol(probe, test_loader, DEVICE, layer_indices=LAYER_INDICES)
+test_metrics = evaluate(probe, test_loader, DEVICE)
 
 print("Per-class Dice scores (test set):")
 for name, d in test_metrics["per_class_dice"].items():
     print(f"  {name:>3s}: {d:.4f}")
 print(f"\nMacro Dice (excl. BG): {test_metrics['macro_dice']:.4f}")
 
+# -- Per-Patient Dice Breakdown --
+patient_dices = []
+
+probe.eval()
+with torch.inference_mode():
+    for entry in test_manifest:
+        data = torch.load(entry["path"], weights_only=True)
+        feats = data["features"].unsqueeze(0).to(DEVICE)
+        label = data["label"].numpy()
+
+        logits = probe(feats)
+        pred = logits.argmax(dim=1).squeeze(0).cpu().numpy()
+
+        patient_dices.append(
+            {
+                "pid": entry["pid"],
+                "z_idx": entry["z_idx"],
+                "macro_dice": macro_dice(pred, label),
+                **{
+                    CLASS_NAMES[c]: dice_score(pred, label, c)
+                    for c in range(NUM_CLASSES)
+                },
+            }
+        )
+
+dice_df = pd.DataFrame(patient_dices)
+patient_summary = dice_df.groupby("pid")[["macro_dice", "RV", "MYO", "LV"]].mean()
+print("Per-patient mean Macro Dice (test set):")
+print(patient_summary.round(4).to_string())
+print(
+    f"\nOverall mean +/- std: "
+    f"{patient_summary['macro_dice'].mean():.4f} "
+    f"+/- {patient_summary['macro_dice'].std():.4f}"
+)
+
+
+# -- Visualization --
 n_show = min(6, len(test_manifest))
 show_indices = np.linspace(0, len(test_manifest) - 1, n_show, dtype=int)
 
@@ -326,26 +370,22 @@ if n_show == 1:
 
 probe.eval()
 with torch.inference_mode():
-    for row, vol_idx in enumerate(show_indices):
-        entry = test_manifest[vol_idx]
+    for row, idx in enumerate(show_indices):
+        entry = test_manifest[idx]
         data = torch.load(entry["path"], weights_only=True)
-        ns = data["n_slices"]
-        mid_z = ns // 2  # pick middle slice
+        feats = data["features"].unsqueeze(0).to(DEVICE)
+        label = data["label"].numpy()
 
-        batch_gpu = {"image": data["image"].unsqueeze(0).to(DEVICE)}
-        for idx in LAYER_INDICES:
-            batch_gpu[f"layer_{idx}"] = data[f"layer_{idx}"].unsqueeze(0).to(DEVICE)
-
-        logits = probe(batch_gpu)
-        pred_vol = logits.argmax(dim=1).squeeze(0).cpu().numpy()  # (H, W, Z)
-        pred = pred_vol[:, :, mid_z]
-        label = data["label"][0, :, :, mid_z].numpy()
+        logits = probe(feats)
+        pred = logits.argmax(dim=1).squeeze(0).cpu().numpy()
 
         gt_overlay = overlay_labels(label, IMAGE_SIZE, IMAGE_SIZE)
         pred_overlay = overlay_labels(pred, IMAGE_SIZE, IMAGE_SIZE)
 
         axes[row, 0].imshow(label, cmap="tab10", vmin=0, vmax=3)
-        axes[row, 0].set_title(f"GT ({entry['pid']}, z={mid_z}/{ns})", fontsize=9)
+        axes[row, 0].set_title(
+            f"GT Labels ({entry['pid']}, z={entry['z_idx']})", fontsize=9
+        )
         axes[row, 0].axis("off")
 
         axes[row, 1].imshow(gt_overlay)
@@ -359,28 +399,24 @@ with torch.inference_mode():
         axes[row, 2].axis("off")
 
 legend_patches = [
-    mpatches.Patch(color=CLASS_COLORS[c][:3] + (1.0,), label=CLASS_NAMES[c])
+    mpatches.Patch(color=(*CLASS_COLORS[c][:3], 1.0), label=CLASS_NAMES[c])
     for c in range(1, NUM_CLASSES)
 ]
 axes[-1, 2].legend(handles=legend_patches, loc="lower right", fontsize=8)
 plt.tight_layout()
-plt.savefig(f"{MODEL_NAME}_unetr3d_test_predictions.png", dpi=150)
+plt.savefig(f"dino_linear_probe_{MODEL_NAME}_test_predictions.png", dpi=150)
 plt.close()
 
 
 # -- Save Model --
-save_path = Path(f"dense_unetr3d_probe_{MODEL_NAME}.pt")
+save_path = Path(f"dense_linear_probe_{MODEL_NAME}.pt")
 torch.save(
     {
         "model_state_dict": probe.state_dict(),
         "model_name": MODEL_NAME,
         "embed_dim": EMBED_DIM,
         "layer_indices": LAYER_INDICES,
-        "dec_chans": DEC_CHANS,
-        "dec_patch_size": DEC_PATCH_SIZE,
-        "dec_scale_factor": DEC_SCALE_FACTOR,
         "num_classes": NUM_CLASSES,
-        "z_pad": Z_PAD,
         "best_epoch": best_epoch,
         "best_val_dice": best_val_dice,
         "test_metrics": test_metrics,

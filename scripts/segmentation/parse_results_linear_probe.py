@@ -1,4 +1,4 @@
-"""Parse .out files and extract model evaluation results into a CSV."""
+"""Parse linear probe .out files and extract model evaluation results into a CSV."""
 
 import re
 import sys
@@ -29,6 +29,10 @@ def parse_block(text: str, arch: str, model: str) -> dict | None:
     macro = re.search(r"Macro Dice \(excl\. BG\):\s*([\d.]+)", text)
     macro_dice = float(macro.group(1)) if macro else None
 
+    overall = re.search(r"Overall mean \+/- std:\s*([\d.]+)\s*\+/-\s*([\d.]+)", text)
+    mean_macro = float(overall.group(1)) if overall else None
+    std_macro = float(overall.group(2)) if overall else None
+
     if not scores or macro_dice is None:
         return None
 
@@ -42,6 +46,8 @@ def parse_block(text: str, arch: str, model: str) -> dict | None:
         "myo_dice": scores.get("MYO"),
         "lv_dice": scores.get("LV"),
         "macro_dice": macro_dice,
+        "mean_macro_dice": mean_macro,
+        "std_macro_dice": std_macro,
     }
 
 
@@ -49,7 +55,6 @@ def parse_file(path: Path) -> list[dict]:
     text = path.read_text()
     results = []
 
-    # Files with multiple models use ">>> ARCH: model" headers
     if ">>>" in text:
         blocks = re.split(r"(?=^>>> )", text, flags=re.MULTILINE)
         for block in blocks:
@@ -62,13 +67,9 @@ def parse_file(path: Path) -> list[dict]:
             if result:
                 results.append(result)
     else:
-        # Single-model files: derive arch from the "Running X" header
         header = re.search(r"Running (.+)", text)
         arch = header.group(1).strip() if header else path.stem
-        # Try to get a more specific model name from source lines
-        source_m = re.search(r"(?:SAM \d source|CineMA source)[^>]*?>\s*(\S+)", text)
-        model = source_m.group(1) if source_m else arch
-        result = parse_block(text, arch, model)
+        result = parse_block(text, arch, arch)
         if result:
             results.append(result)
 
@@ -76,9 +77,9 @@ def parse_file(path: Path) -> list[dict]:
 
 
 def main():
-    out_files = sorted(p for p in OUT_DIR.glob("*.out") if "linear_probe" not in p.name)
+    out_files = sorted(OUT_DIR.glob("*linear_probe*.out"))
     if not out_files:
-        print("No .out files found.", file=sys.stderr)
+        print("No linear probe .out files found.", file=sys.stderr)
         sys.exit(1)
 
     all_results = []
@@ -89,7 +90,7 @@ def main():
         print("No results parsed.", file=sys.stderr)
         sys.exit(1)
 
-    output_path = OUT_DIR / "results.csv"
+    output_path = OUT_DIR / "results_linear_probe.csv"
     df = pd.DataFrame(
         all_results,
         columns=[
@@ -102,13 +103,20 @@ def main():
             "myo_dice",
             "lv_dice",
             "macro_dice",
+            "mean_macro_dice",
+            "std_macro_dice",
         ],
     )
     df.to_csv(output_path, index=False)
 
     print(f"Wrote {len(all_results)} rows to {output_path}")
     for r in all_results:
-        print(f"  {r['arch']:10s}  {r['model']:40s}  macro={r['macro_dice']:.4f}")
+        mean = (
+            f"  mean={r['mean_macro_dice']:.4f}"
+            if r["mean_macro_dice"] is not None
+            else ""
+        )
+        print(f"  {r['arch']:10s}  {r['model']:40s}  macro={r['macro_dice']:.4f}{mean}")
 
 
 if __name__ == "__main__":
