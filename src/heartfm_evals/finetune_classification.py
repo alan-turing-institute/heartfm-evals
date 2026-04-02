@@ -221,10 +221,14 @@ def _group_samples_by_patient(
         if info["ed_idx"] is None or info["es_idx"] is None:
             logger.warning("Skipping %s: missing ED or ES frame", pid)
             continue
+        pathology = pathology_map[pid]
+        if pathology not in pathology_classes:
+            logger.warning("Skipping %s: unknown pathology '%s'", pid, pathology)
+            continue
         patients.append(
             {
                 "pid": pid,
-                "label": pathology_classes[pathology_map[pid]],
+                "label": pathology_classes[pathology],
                 "ed_idx": info["ed_idx"],
                 "es_idx": info["es_idx"],
             }

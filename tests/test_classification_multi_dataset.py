@@ -99,14 +99,18 @@ class TestBuildPatientFeatures:
         assert labels.tolist() == [0, 2, 5]  # NOR=0, ARR=2, LV=5
         assert out_pids == ["p1", "p2", "p3"]
 
-    def test_unknown_pathology_raises(self):
+    def test_unknown_pathology_skipped(self):
+        """Patients with a pathology not in the class map are silently skipped."""
         mnm2_classes = get_pathology_classes("mnm2")
-        pids = ["p1"]
+        pids = ["p1", "p2"]
         cls_features = _make_cls_features(pids, embed_dim=8)
-        pathology_map = {"p1": "MINF"}  # MINF not in MnM2
+        pathology_map = {"p1": "MINF", "p2": "NOR"}  # MINF not in MnM2
 
-        with pytest.raises(KeyError):
-            build_patient_features(cls_features, pathology_map, pathology_classes=mnm2_classes)
+        features, labels, out_pids = build_patient_features(
+            cls_features, pathology_map, pathology_classes=mnm2_classes,
+        )
+        assert out_pids == ["p2"]  # p1 (MINF) was skipped
+        assert labels.tolist() == [0]  # NOR=0
 
     def test_default_uses_acdc_classes(self):
         """When pathology_classes is None, ACDC classes are used (backward compat)."""

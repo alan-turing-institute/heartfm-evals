@@ -261,13 +261,13 @@ def main():
     print(f"Pooling: {args.pooling}")
 
     # ── Load metadata and datasets ──
-    train_meta_df = pd.read_csv(args.data_dir / "train_metadata.csv")
-    test_meta_df = pd.read_csv(args.data_dir / "test_metadata.csv")
+    train_meta_df = pd.read_csv(args.data_dir / "train_metadata.csv", dtype={"pid": str})
+    test_meta_df = pd.read_csv(args.data_dir / "test_metadata.csv", dtype={"pid": str})
 
     # Auto-detect val split
     val_meta_path = args.data_dir / "val_metadata.csv"
     has_val_split = val_meta_path.exists()
-    val_meta_df = pd.read_csv(val_meta_path) if has_val_split else None
+    val_meta_df = pd.read_csv(val_meta_path, dtype={"pid": str}) if has_val_split else None
 
     if args.max_patients:
         train_meta_df = train_meta_df.head(args.max_patients)

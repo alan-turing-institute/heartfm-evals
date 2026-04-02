@@ -453,8 +453,12 @@ def build_patient_features(
         es_mean = es_feats.mean(dim=0)  # (dim,)
         patient_feat = torch.cat([ed_mean, es_mean])  # (2*dim,)
 
+        pathology = pathology_map[pid]
+        if pathology not in pathology_classes:
+            logger.warning("Skipping %s: unknown pathology '%s'", pid, pathology)
+            continue
         features_list.append(patient_feat)
-        labels_list.append(pathology_classes[pathology_map[pid]])
+        labels_list.append(pathology_classes[pathology])
         pids.append(pid)
 
     features = torch.stack(features_list).to(dtype=torch.float64)
