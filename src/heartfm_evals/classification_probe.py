@@ -21,6 +21,7 @@ and C-sweep via stratified CV.
 from __future__ import annotations
 
 import logging
+import warnings
 from collections import defaultdict
 from pathlib import Path
 
@@ -470,6 +471,87 @@ def build_patient_features(
 def get_pathology_map(meta_df) -> dict[str, str]:
     """Extract {pid: pathology} mapping from an ACDC metadata DataFrame."""
     return dict(zip(meta_df["pid"], meta_df["pathology"], strict=False))
+
+
+def validate_split_pathology_labels(
+    train_pathology_map: dict[str, str],
+    pathology_classes: dict[str, int] | None = None,
+    val_pathology_map: dict[str, str] | None = None,
+    test_pathology_map: dict[str, str] | None = None,
+) -> dict[str, set[str]]:
+    """Validate split label coverage and emit warnings for suspicious cases.
+
+    This function reports train/val/test label coverage diagnostics. It warns
+    when validation or test splits contain labels that are absent from training
+    (or unknown to ``pathology_classes``), because this can invalidate metrics.
+
+    Args:
+        train_pathology_map: ``{pid: pathology}`` map for training split.
+        pathology_classes: ``{class_name: int_label}`` mapping. Defaults to
+            ACDC classes.
+        val_pathology_map: Optional ``{pid: pathology}`` map for val split.
+        test_pathology_map: Optional ``{pid: pathology}`` map for test split.
+
+    Returns:
+        Dict with set diagnostics for missing/extra labels in each split.
+    """
+    if pathology_classes is None:
+        pathology_classes = PATHOLOGY_CLASSES
+
+    expected = set(pathology_classes.keys())
+    train_labels = set(train_pathology_map.values())
+
+    train_missing = expected - train_labels
+    train_unknown = train_labels - expected
+
+    # Unknown labels in training are always suspicious and should be warned.
+    # Missing expected labels in training can be legitimate in subset runs, so
+    # they are reported in diagnostics without warning.
+    if train_unknown:
+        warnings.warn(
+            "Training labels mismatch pathology_classes. "
+            f"missing={sorted(train_missing)}, unknown={sorted(train_unknown)}",
+            stacklevel=2,
+        )
+
+    diagnostics: dict[str, set[str]] = {
+        "train_missing": train_missing,
+        "train_unknown": train_unknown,
+        "val_unknown": set(),
+        "val_unseen_from_train": set(),
+        "test_unknown": set(),
+        "test_unseen_from_train": set(),
+    }
+
+    split_maps = {
+        "val": val_pathology_map,
+        "test": test_pathology_map,
+    }
+    for split_name, split_map in split_maps.items():
+        if split_map is None:
+            continue
+
+        split_labels = set(split_map.values())
+        unknown = split_labels - expected
+        unseen_from_train = (split_labels - train_labels) & expected
+
+        diagnostics[f"{split_name}_unknown"] = unknown
+        diagnostics[f"{split_name}_unseen_from_train"] = unseen_from_train
+
+        if unknown:
+            warnings.warn(
+                f"{split_name} split has labels not in pathology_classes: "
+                f"{sorted(unknown)}",
+                stacklevel=2,
+            )
+        if unseen_from_train:
+            warnings.warn(
+                f"{split_name} split has labels absent from training split: "
+                f"{sorted(unseen_from_train)}",
+                stacklevel=2,
+            )
+
+    return diagnostics
 
 
 # ── Logistic Regression C-Sweep with Stratified K-Fold CV ─────────────────────

@@ -5,6 +5,7 @@ All tests use synthetic data — no real models or data files required.
 
 from __future__ import annotations
 
+import warnings
 from unittest.mock import MagicMock
 
 import numpy as np
@@ -20,6 +21,7 @@ from heartfm_evals.classification_probe import (
     evaluate_classification,
     get_pathology_classes,
     sweep_C_and_train,
+    validate_split_pathology_labels,
 )
 from heartfm_evals.finetune_classification import (
     ClassificationHead,
@@ -78,6 +80,80 @@ class TestPathologyClassRegistry:
     def test_backward_compat_global(self):
         """The old PATHOLOGY_CLASSES global should still equal ACDC classes."""
         assert PATHOLOGY_CLASSES == get_pathology_classes("acdc")
+
+    def test_validate_split_labels_train_exact_match_no_warning(self):
+        mnm2_classes = get_pathology_classes("mnm2")
+        train_map = {
+            "p1": "NOR",
+            "p2": "HCM",
+            "p3": "ARR",
+            "p4": "CIA",
+            "p5": "FALL",
+            "p6": "LV",
+        }
+        val_map = {"v1": "NOR", "v2": "LV"}
+
+        with warnings.catch_warnings(record=True) as record:
+            warnings.simplefilter("always")
+            diagnostics = validate_split_pathology_labels(
+                train_map,
+                pathology_classes=mnm2_classes,
+                val_pathology_map=val_map,
+            )
+
+        assert len(record) == 0
+        assert diagnostics["train_missing"] == set()
+        assert diagnostics["train_unknown"] == set()
+        assert diagnostics["val_unknown"] == set()
+        assert diagnostics["val_unseen_from_train"] == set()
+
+    def test_validate_split_labels_warn_for_unknown_val_or_test_labels(self):
+        mnm2_classes = get_pathology_classes("mnm2")
+        # Train split covers all classes; val/test include unknown labels.
+        train_map = {
+            "p1": "NOR",
+            "p2": "HCM",
+            "p3": "ARR",
+            "p4": "FALL",
+            "p5": "CIA",
+            "p6": "LV",
+        }
+        val_map = {"v1": "NOR", "v2": "LV", "v3": "XXX"}
+        test_map = {"t1": "ARR", "t2": "CIA", "t3": "YYY"}
+
+        with pytest.warns(UserWarning, match="not in pathology_classes"):
+            diagnostics = validate_split_pathology_labels(
+                train_map,
+                pathology_classes=mnm2_classes,
+                val_pathology_map=val_map,
+                test_pathology_map=test_map,
+            )
+
+        assert diagnostics["val_unknown"] == {"XXX"}
+        assert diagnostics["test_unknown"] == {"YYY"}
+
+    def test_validate_split_labels_warn_for_val_and_test_unseen_from_train(self):
+        mnm2_classes = get_pathology_classes("mnm2")
+        # Train split intentionally missing CIA and LV.
+        train_map = {
+            "p1": "NOR",
+            "p2": "HCM",
+            "p3": "ARR",
+            "p4": "FALL",
+        }
+        val_map = {"v1": "NOR", "v2": "LV"}
+        test_map = {"t1": "ARR", "t2": "CIA"}
+
+        with pytest.warns(UserWarning, match="absent from training split"):
+            diagnostics = validate_split_pathology_labels(
+                train_map,
+                pathology_classes=mnm2_classes,
+                val_pathology_map=val_map,
+                test_pathology_map=test_map,
+            )
+
+        assert diagnostics["val_unseen_from_train"] == {"LV"}
+        assert diagnostics["test_unseen_from_train"] == {"CIA"}
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -240,7 +316,11 @@ class TestSweepCWithValSplit:
         train_features, train_labels = self._make_synthetic_data()
 
         best_C, pipeline, sweep_results = sweep_C_and_train(
-            train_features, train_labels, n_folds=3,
+            train_features,
+            train_labels,
+            n_folds=3,
+            max_iter=10_000,
+            tol=1e-4,
         )
 
         assert best_C > 0

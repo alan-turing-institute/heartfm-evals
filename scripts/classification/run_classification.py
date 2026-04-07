@@ -38,6 +38,7 @@ from heartfm_evals.classification_probe import (
     get_pathology_map,
     load_cached_cls_features,
     sweep_C_and_train,
+    validate_split_pathology_labels,
 )
 from heartfm_evals.finetune_classification import (
     evaluate_finetune_classification,
@@ -307,6 +308,12 @@ def main():
     train_pathology_map = get_pathology_map(train_meta_df)
     test_pathology_map = get_pathology_map(test_meta_df)
     val_pathology_map = get_pathology_map(val_meta_df) if val_meta_df is not None else None
+    validate_split_pathology_labels(
+        train_pathology_map,
+        pathology_classes=pathology_classes,
+        val_pathology_map=val_pathology_map,
+        test_pathology_map=test_pathology_map,
+    )
 
     # ── Feature caching (logreg only) ──
     if args.eval_mode == "logreg":
