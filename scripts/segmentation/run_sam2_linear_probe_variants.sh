@@ -11,15 +11,15 @@ SAM2_VARIANTS=(
 )
 
 echo "=============================="
-echo " Running SAM 2.1 UNetR variants"
+echo " Running SAM 2.1 linear probe variants"
 echo "=============================="
 for model in "${SAM2_VARIANTS[@]}"; do
     echo ""
-    echo ">>> SAM 2.1 UNetR: $model"
+    echo ">>> SAM 2.1: $model"
     echo "------------------------------"
-    python "$SCRIPT_DIR/acdc_sam2_unetr_segmentation.py" --model "$model"
+    python "$SCRIPT_DIR/acdc_sam2_dense_linear_probe_segmentation.py" --model "$model"
     echo "Done: $model"
 done
 
 echo ""
-echo "============================== All SAM 2.1 UNetR variants complete =============================="
+echo "============================== All SAM 2.1 linear probe variants complete =============================="

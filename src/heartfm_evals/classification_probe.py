@@ -338,7 +338,9 @@ def cache_cinema_cls_features(
         fpath = cache_dir / f"{pid}_{frame}.pt"
 
         if not fpath.exists():
-            token = _extract_cinema_volume_token(backbone, image_3d, device, pooling=pooling)
+            token = _extract_cinema_volume_token(
+                backbone, image_3d, device, pooling=pooling
+            )
             torch.save({"cls_token": token}, fpath)
 
         manifest.append({"path": fpath, "pid": pid, "is_ed": is_ed})

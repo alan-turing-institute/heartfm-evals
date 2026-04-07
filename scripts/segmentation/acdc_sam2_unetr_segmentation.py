@@ -53,26 +53,30 @@ _SAM2_VARIANTS = [
 
 # Per-variant configs: embed_dim at main Hiera stage (base * 4) and 4 layer
 # indices evenly spaced within that stage's block range.
-#   tiny:     stages [1,2,7,2], stage-2 blocks 3-9  (embed 96*4=384)
-#   small:    stages [1,2,11,2], stage-2 blocks 3-13 (embed 96*4=384)
-#   base+:    stages [2,3,16,3], stage-2 blocks 5-20 (embed 112*4=448)
-#   large:    stages [2,6,36,4], stage-2 blocks 8-43 (embed 144*4=576)
+#
+# hidden_states from transformers includes the initial patch embedding as
+# index 0, so hidden_states[i+1] is the output of block i.  Stage-2 block
+# ranges below are therefore shifted +1 vs the raw block numbers:
+#   tiny:     stages [1,2,7,2], stage-2 hidden_states 4-10  (embed 96*4=384)
+#   small:    stages [1,2,11,2], stage-2 hidden_states 4-14 (embed 96*4=384)
+#   base+:    stages [2,3,16,3], stage-2 hidden_states 6-21 (embed 112*4=448)
+#   large:    stages [2,6,36,4], stage-2 hidden_states 9-44 (embed 144*4=576)
 _SAM2_CONFIGS = {
     "facebook/sam2.1-hiera-tiny": {
         "embed_dim": 384,
-        "layer_indices": (3, 5, 7, 9),
+        "layer_indices": (4, 6, 8, 10),
     },
     "facebook/sam2.1-hiera-small": {
         "embed_dim": 384,
-        "layer_indices": (3, 6, 10, 13),
+        "layer_indices": (4, 7, 11, 14),
     },
     "facebook/sam2.1-hiera-base-plus": {
         "embed_dim": 448,
-        "layer_indices": (5, 10, 15, 20),
+        "layer_indices": (6, 11, 16, 21),
     },
     "facebook/sam2.1-hiera-large": {
         "embed_dim": 576,
-        "layer_indices": (8, 20, 32, 43),
+        "layer_indices": (9, 21, 33, 44),
     },
 }
 
@@ -252,7 +256,8 @@ def cache_sam2_volume_features(
     grid_size=GRID_SIZE,
 ):
     """Cache SAM 2 volume features for all patients/frames."""
-    out_dir = Path(cache_dir)
+    layers_tag = "layers_" + "-".join(str(i) for i in sorted(layer_indices))
+    out_dir = Path(cache_dir) / layers_tag
     out_dir.mkdir(parents=True, exist_ok=True)
     manifest = []
 

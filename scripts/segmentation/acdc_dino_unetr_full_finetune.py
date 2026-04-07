@@ -101,11 +101,17 @@ class FinetunableDINOv3UNetR(nn.Module):
     def _extract_volume_features(self, image: torch.Tensor) -> dict[str, torch.Tensor]:
         """Extract per-layer 3D feature volumes for a batch of padded volumes."""
         batch_size, _, _, _, depth = image.shape
-        per_layer: dict[int, list[torch.Tensor]] = {idx: [] for idx in self.layer_indices}
+        per_layer: dict[int, list[torch.Tensor]] = {
+            idx: [] for idx in self.layer_indices
+        }
 
         # ImageNet normalization constants (reshaped for broadcasting over (B, 3, H, W)).
-        imagenet_mean = torch.tensor([0.485, 0.456, 0.406], device=image.device, dtype=image.dtype).view(1, 3, 1, 1)
-        imagenet_std = torch.tensor([0.229, 0.224, 0.225], device=image.device, dtype=image.dtype).view(1, 3, 1, 1)
+        imagenet_mean = torch.tensor(
+            [0.485, 0.456, 0.406], device=image.device, dtype=image.dtype
+        ).view(1, 3, 1, 1)
+        imagenet_std = torch.tensor(
+            [0.229, 0.224, 0.225], device=image.device, dtype=image.dtype
+        ).view(1, 3, 1, 1)
 
         for z in range(depth):
             slice_batch = image[:, 0, :, :, z]  # (B, H, W)
@@ -131,7 +137,9 @@ class FinetunableDINOv3UNetR(nn.Module):
 
         feature_batch: dict[str, torch.Tensor] = {"image": image}
         for layer_idx in self.layer_indices:
-            feature_batch[f"layer_{layer_idx}"] = torch.stack(per_layer[layer_idx], dim=-1)
+            feature_batch[f"layer_{layer_idx}"] = torch.stack(
+                per_layer[layer_idx], dim=-1
+            )
         return feature_batch
 
     def forward(self, batch: dict[str, torch.Tensor]) -> torch.Tensor:
@@ -237,7 +245,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--decoder-lr", type=float, default=1e-4, help="Learning rate for decoder"
     )
     parser.add_argument(
-        "--backbone-lr", type=float, default=1e-5, help="Learning rate for DINO backbone"
+        "--backbone-lr",
+        type=float,
+        default=1e-5,
+        help="Learning rate for DINO backbone",
     )
     parser.add_argument(
         "--weight-decay", type=float, default=1e-4, help="AdamW weight decay"
@@ -262,7 +273,9 @@ def build_datasets(acdc_data_dir: Path):
 
     if "pathology" in train_meta_df.columns:
         val_pids = (
-            train_meta_df.groupby("pathology").sample(n=2, random_state=0)["pid"].tolist()
+            train_meta_df.groupby("pathology")
+            .sample(n=2, random_state=0)["pid"]
+            .tolist()
         )
     else:
         val_pids = train_meta_df.sample(frac=0.1, random_state=0)["pid"].tolist()
@@ -295,11 +308,19 @@ def build_datasets(acdc_data_dir: Path):
         transform=transform,
     )
 
-    return train_cinema, val_cinema, test_cinema, val_pids, train_split_df, val_split_df, test_meta_df
+    return (
+        train_cinema,
+        val_cinema,
+        test_cinema,
+        val_pids,
+        train_split_df,
+        val_split_df,
+        test_meta_df,
+    )
 
 
 def choose_device() -> torch.device:
-    #if torch.backends.mps.is_available():
+    # if torch.backends.mps.is_available():
     #    return torch.device("mps")
     if torch.cuda.is_available():
         return torch.device("cuda")
@@ -310,16 +331,22 @@ def main() -> None:
     args = build_parser().parse_args()
 
     model_name = args.model
-    weights_path = args.weights_path or (REPO_ROOT / "model_weights" / f"{model_name}.pth")
-    embed_dim = MODEL_CONFIGS[model_name]["embed_dim"]
-    n_layers = MODEL_CONFIGS[model_name]["n_layers"]
+    _cfg = MODEL_CONFIGS[model_name]
+    weights_path = args.weights_path or (
+        REPO_ROOT / "model_weights" / _cfg.get("weights_filename", f"{model_name}.pth")
+    )
+    embed_dim = _cfg["embed_dim"]
+    n_layers = _cfg["n_layers"]
+    layer_indices = _cfg["layer_indices"]
     device = choose_device()
 
     print(f"Using device: {device}")
     print(f"Backbone: {model_name} (embed_dim={embed_dim}, layers={n_layers})")
-    print(f"Selected layers: {LAYER_INDICES}")
+    print(f"Selected layers: {layer_indices}")
     print(f"Decoder: UpsampleDecoder(3D) chans={DEC_CHANS}, Z-pad={args.z_pad}")
-    print(f"Fine-tune mode: {'decoder-only' if args.freeze_backbone else 'full backbone'}")
+    print(
+        f"Fine-tune mode: {'decoder-only' if args.freeze_backbone else 'full backbone'}"
+    )
 
     (
         train_cinema,
@@ -381,18 +408,20 @@ def main() -> None:
 
     decoder = DINOv3UNetRDecoder(
         embed_dim=embed_dim,
-        layer_indices=LAYER_INDICES,
+        layer_indices=layer_indices,
         dec_chans=DEC_CHANS,
         dec_patch_size=DEC_PATCH_SIZE,
         dec_scale_factor=DEC_SCALE_FACTOR,
         num_classes=NUM_CLASSES,
     )
-    probe = FinetunableDINOv3UNetR(backbone, decoder, layer_indices=LAYER_INDICES).to(
+    probe = FinetunableDINOv3UNetR(backbone, decoder, layer_indices=layer_indices).to(
         device
     )
 
     class_weights = compute_class_weights(train_ds)
-    criterion = MaskedVolumeLoss(class_weights.to(device), ce_weight=1.0, dice_weight=1.0)
+    criterion = MaskedVolumeLoss(
+        class_weights.to(device), ce_weight=1.0, dice_weight=1.0
+    )
 
     if args.freeze_backbone:
         optimizer = torch.optim.AdamW(
@@ -435,7 +464,7 @@ def main() -> None:
             criterion,
             optimizer,
             device,
-            layer_indices=LAYER_INDICES,
+            layer_indices=layer_indices,
         )
         scheduler.step()
 
@@ -562,7 +591,7 @@ def main() -> None:
             "model_state_dict": probe.state_dict(),
             "model_name": model_name,
             "embed_dim": embed_dim,
-            "layer_indices": LAYER_INDICES,
+            "layer_indices": layer_indices,
             "dec_chans": DEC_CHANS,
             "dec_patch_size": DEC_PATCH_SIZE,
             "dec_scale_factor": DEC_SCALE_FACTOR,

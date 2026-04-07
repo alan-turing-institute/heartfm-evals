@@ -4,7 +4,7 @@
 #SBATCH --qos turing
 #SBATCH --account vjgo8416-heartfm
 #SBATCH --time 03:00:0
-#SBATCH --nodes 1 
+#SBATCH --nodes 1
 #SBATCH --gpus-per-node 4
 #SBATCH --cpus-per-gpu 36
 #SBATCH --mem 16G

@@ -134,7 +134,9 @@ def _extract_patient_feature_sam(
         if ve.pos_embed is not None:
             hidden = hidden + ve.pos_embed
         for layer in ve.layers:
-            hidden = torch.utils.checkpoint.checkpoint(layer, hidden, use_reentrant=False)
+            hidden = torch.utils.checkpoint.checkpoint(
+                layer, hidden, use_reentrant=False
+            )
         # hidden: (1, h, w, C) — before the neck projection
         cls_token = hidden.squeeze(0).mean(dim=(0, 1))  # (C,)
         slice_feats.append(cls_token)
@@ -167,9 +169,13 @@ def extract_patient_feature(
         Patient feature vector of shape (2 * embed_dim,).
     """
     if backbone_type == "dinov3":
-        extract_fn = lambda s: _extract_patient_feature_dinov3(backbone, s, device, pooling=pooling)
+        extract_fn = lambda s: _extract_patient_feature_dinov3(
+            backbone, s, device, pooling=pooling
+        )
     elif backbone_type == "cinema":
-        extract_fn = lambda s: _extract_patient_feature_cinema(backbone, s, device, pooling=pooling)
+        extract_fn = lambda s: _extract_patient_feature_cinema(
+            backbone, s, device, pooling=pooling
+        )
     elif backbone_type == "sam":
         extract_fn = lambda s: _extract_patient_feature_sam(
             backbone, image_processor, s, device

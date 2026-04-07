@@ -99,7 +99,9 @@ def build_summary(dataset_dir: Path) -> str:
             rows.append(m)
 
     mode_order = {"logreg": 0, "ft-frozen": 1, "ft-full": 2}
-    rows.sort(key=lambda r: (r["backbone"], mode_order.get(r["eval_mode"], 9), r["pooling"]))
+    rows.sort(
+        key=lambda r: (r["backbone"], mode_order.get(r["eval_mode"], 9), r["pooling"])
+    )
 
     buf = io.StringIO()
     writer = csv.writer(buf)
