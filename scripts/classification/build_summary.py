@@ -88,9 +88,9 @@ COLUMNS = [
 ]
 
 
-def build_summary(results_dir: Path) -> str:
-    """Build the full summary.csv content."""
-    json_files = sorted(results_dir.glob("*.json"))
+def build_summary(dataset_dir: Path) -> str:
+    """Build summary.csv content for a single dataset directory."""
+    json_files = sorted(dataset_dir.glob("*.json"))
 
     rows = []
     for f in json_files:
@@ -98,7 +98,6 @@ def build_summary(results_dir: Path) -> str:
         if m:
             rows.append(m)
 
-    # Sort: backbone name, then eval mode, then pooling
     mode_order = {"logreg": 0, "ft-frozen": 1, "ft-full": 2}
     rows.sort(
         key=lambda r: (r["backbone"], mode_order.get(r["eval_mode"], 9), r["pooling"])
@@ -121,11 +120,15 @@ def main():
     )
     args = p.parse_args()
 
-    summary = build_summary(args.results_dir)
-    out_path = args.results_dir / "summary.csv"
-    out_path.write_text(summary)
-    print(summary)
-    print(f"Written to {out_path}")
+    for subdir in sorted(args.results_dir.iterdir()):
+        if not subdir.is_dir() or not list(subdir.glob("*.json")):
+            continue
+        summary = build_summary(subdir)
+        out_path = subdir / "summary.csv"
+        out_path.write_text(summary)
+        print(f"=== {subdir.name} ===")
+        print(summary)
+        print(f"Written to {out_path}\n")
 
 
 if __name__ == "__main__":

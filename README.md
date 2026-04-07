@@ -73,7 +73,9 @@ Each script runs the corresponding Python segmentation script and saves model ch
 
 ### Classification
 
-ACDC 5-way pathology classification and binary disease detection results are available in the [results spreadsheet](https://docs.google.com/spreadsheets/d/1yh8o8nqLrVV9fR_JaKjF-luf-cshnsQdGn1Awjl3Txw/edit?usp=sharing). Per-run details (per-class metrics, confusion matrices) are in the individual JSON files under `results/classification/`.
+Patient-level pathology classification across ACDC, M&Ms, and M&Ms-2 using frozen or fine-tuned backbone representations. See [scripts/classification/README.md](scripts/classification/README.md) for full details on datasets, backbones, evaluation modes, and how to run experiments.
+
+Summary results are available in the [results spreadsheet](https://docs.google.com/spreadsheets/d/1yh8o8nqLrVV9fR_JaKjF-luf-cshnsQdGn1Awjl3Txw/edit?usp=sharing). Per-run details (per-class metrics, confusion matrices) are in the individual JSON files under `results/classification/`.
 
 ### Segmentation
 

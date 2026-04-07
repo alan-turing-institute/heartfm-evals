@@ -21,6 +21,7 @@ and C-sweep via stratified CV.
 from __future__ import annotations
 
 import logging
+import warnings
 from collections import defaultdict
 from pathlib import Path
 
@@ -46,7 +47,20 @@ from heartfm_evals.dense_linear_probe import preprocess_slice
 logger = logging.getLogger(__name__)
 
 # ── Constants ──────────────────────────────────────────────────────────────────
-PATHOLOGY_CLASSES = {"NOR": 0, "DCM": 1, "HCM": 2, "MINF": 3, "RV": 4}
+DATASET_PATHOLOGY_CLASSES: dict[str, dict[str, int]] = {
+    "acdc": {"NOR": 0, "DCM": 1, "HCM": 2, "MINF": 3, "RV": 4},
+    "mnm": {"NOR": 0, "DCM": 1, "HCM": 2, "ARV": 3, "HHD": 4},
+    "mnm2": {"NOR": 0, "HCM": 1, "ARR": 2, "CIA": 3, "FALL": 4, "LV": 5},
+}
+
+
+def get_pathology_classes(dataset: str) -> dict[str, int]:
+    """Return the pathology class mapping for a dataset."""
+    return DATASET_PATHOLOGY_CLASSES[dataset]
+
+
+# Backward-compatible aliases (ACDC defaults)
+PATHOLOGY_CLASSES = DATASET_PATHOLOGY_CLASSES["acdc"]
 PATHOLOGY_NAMES = {v: k for k, v in PATHOLOGY_CLASSES.items()}
 PATHOLOGY_NAMES_LONG = {
     "NOR": "Normal",
@@ -409,18 +423,23 @@ def cache_sam_cls_features(
 def build_patient_features(
     cls_features: dict[str, dict],
     pathology_map: dict[str, str],
+    pathology_classes: dict[str, int] | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor, list[str]]:
     """Aggregate per-patient CLS features: mean-pool ED + mean-pool ES, concatenate.
 
     Args:
         cls_features: Output of extract_cls_features().
         pathology_map: {pid: pathology_string} from metadata.
+        pathology_classes: {class_name: int_label} mapping. Defaults to ACDC classes.
 
     Returns:
         features: (N_patients, 2 * embed_dim) float64 tensor.
         labels: (N_patients,) integer tensor.
         pids: List of patient IDs in the same order.
     """
+    if pathology_classes is None:
+        pathology_classes = PATHOLOGY_CLASSES
+
     features_list = []
     labels_list = []
     pids = []
@@ -437,8 +456,12 @@ def build_patient_features(
         es_mean = es_feats.mean(dim=0)  # (dim,)
         patient_feat = torch.cat([ed_mean, es_mean])  # (2*dim,)
 
+        pathology = pathology_map[pid]
+        if pathology not in pathology_classes:
+            logger.warning("Skipping %s: unknown pathology '%s'", pid, pathology)
+            continue
         features_list.append(patient_feat)
-        labels_list.append(PATHOLOGY_CLASSES[pathology_map[pid]])
+        labels_list.append(pathology_classes[pathology])
         pids.append(pid)
 
     features = torch.stack(features_list).to(dtype=torch.float64)
@@ -452,6 +475,87 @@ def get_pathology_map(meta_df) -> dict[str, str]:
     return dict(zip(meta_df["pid"], meta_df["pathology"], strict=False))
 
 
+def validate_split_pathology_labels(
+    train_pathology_map: dict[str, str],
+    pathology_classes: dict[str, int] | None = None,
+    val_pathology_map: dict[str, str] | None = None,
+    test_pathology_map: dict[str, str] | None = None,
+) -> dict[str, set[str]]:
+    """Validate split label coverage and emit warnings for suspicious cases.
+
+    This function reports train/val/test label coverage diagnostics. It warns
+    when validation or test splits contain labels that are absent from training
+    (or unknown to ``pathology_classes``), because this can invalidate metrics.
+
+    Args:
+        train_pathology_map: ``{pid: pathology}`` map for training split.
+        pathology_classes: ``{class_name: int_label}`` mapping. Defaults to
+            ACDC classes.
+        val_pathology_map: Optional ``{pid: pathology}`` map for val split.
+        test_pathology_map: Optional ``{pid: pathology}`` map for test split.
+
+    Returns:
+        Dict with set diagnostics for missing/extra labels in each split.
+    """
+    if pathology_classes is None:
+        pathology_classes = PATHOLOGY_CLASSES
+
+    expected = set(pathology_classes.keys())
+    train_labels = set(train_pathology_map.values())
+
+    train_missing = expected - train_labels
+    train_unknown = train_labels - expected
+
+    # Unknown labels in training are always suspicious and should be warned.
+    # Missing expected labels in training can be legitimate in subset runs, so
+    # they are reported in diagnostics without warning.
+    if train_unknown:
+        warnings.warn(
+            "Training labels mismatch pathology_classes. "
+            f"missing={sorted(train_missing)}, unknown={sorted(train_unknown)}",
+            stacklevel=2,
+        )
+
+    diagnostics: dict[str, set[str]] = {
+        "train_missing": train_missing,
+        "train_unknown": train_unknown,
+        "val_unknown": set(),
+        "val_unseen_from_train": set(),
+        "test_unknown": set(),
+        "test_unseen_from_train": set(),
+    }
+
+    split_maps = {
+        "val": val_pathology_map,
+        "test": test_pathology_map,
+    }
+    for split_name, split_map in split_maps.items():
+        if split_map is None:
+            continue
+
+        split_labels = set(split_map.values())
+        unknown = split_labels - expected
+        unseen_from_train = (split_labels - train_labels) & expected
+
+        diagnostics[f"{split_name}_unknown"] = unknown
+        diagnostics[f"{split_name}_unseen_from_train"] = unseen_from_train
+
+        if unknown:
+            warnings.warn(
+                f"{split_name} split has labels not in pathology_classes: "
+                f"{sorted(unknown)}",
+                stacklevel=2,
+            )
+        if unseen_from_train:
+            warnings.warn(
+                f"{split_name} split has labels absent from training split: "
+                f"{sorted(unseen_from_train)}",
+                stacklevel=2,
+            )
+
+    return diagnostics
+
+
 # ── Logistic Regression C-Sweep with Stratified K-Fold CV ─────────────────────
 def sweep_C_and_train(
     features: torch.Tensor,
@@ -459,18 +563,23 @@ def sweep_C_and_train(
     n_folds: int = 10,
     max_iter: int = 1_000,
     tol: float = 1e-12,
+    val_features: torch.Tensor | None = None,
+    val_labels: torch.Tensor | None = None,
 ) -> tuple[float, Pipeline, list[dict]]:
-    """Sweep regularisation strength C using stratified k-fold CV, retrain on all data.
+    """Sweep regularisation strength C, then retrain on all training data.
 
-    Each fold fits a StandardScaler on the training portion and applies it to
-    the held-out portion, so feature normalisation never leaks test information.
+    When ``val_features`` and ``val_labels`` are provided, each C is evaluated
+    on the dedicated validation set (single split). Otherwise, stratified
+    k-fold CV is used.
 
     Args:
         features: (N, D) float64 feature matrix (all training patients).
         labels: (N,) int label vector.
-        n_folds: Number of stratified CV folds.
+        n_folds: Number of stratified CV folds (ignored when val data provided).
         max_iter: Maximum iterations for L-BFGS.
         tol: Convergence tolerance.
+        val_features: Optional (M, D) float64 validation feature matrix.
+        val_labels: Optional (M,) int validation label vector.
 
     Returns:
         best_C: The regularisation strength with highest mean CV accuracy.
@@ -482,16 +591,20 @@ def sweep_C_and_train(
     X = features.numpy()
     y = labels.numpy()
 
-    skf = StratifiedKFold(n_splits=n_folds, shuffle=True, random_state=0)
-    folds = list(skf.split(X, y))
+    use_val_split = val_features is not None and val_labels is not None
+    if use_val_split:
+        X_val = val_features.numpy()
+        y_val = val_labels.numpy()
+    else:
+        skf = StratifiedKFold(n_splits=n_folds, shuffle=True, random_state=0)
+        folds = list(skf.split(X, y))
 
     best_mean_acc = -1.0
     best_C = ALL_C[0]
     sweep_results: list[dict] = []
 
     for C in tqdm(ALL_C, desc="C-sweep (CV)"):
-        fold_accs = []
-        for train_idx, val_idx in folds:
+        if use_val_split:
             pipe = Pipeline(
                 [
                     ("scaler", StandardScaler()),
@@ -506,11 +619,31 @@ def sweep_C_and_train(
                     ),
                 ]
             )
-            pipe.fit(X[train_idx], y[train_idx])
-            fold_accs.append(accuracy_score(y[val_idx], pipe.predict(X[val_idx])))
+            pipe.fit(X, y)
+            mean_acc = float(accuracy_score(y_val, pipe.predict(X_val)))
+            std_acc = 0.0
+        else:
+            fold_accs = []
+            for train_idx, val_idx in folds:
+                pipe = Pipeline(
+                    [
+                        ("scaler", StandardScaler()),
+                        (
+                            "clf",
+                            LogisticRegression(
+                                solver="lbfgs",
+                                C=C,
+                                max_iter=max_iter,
+                                tol=tol,
+                            ),
+                        ),
+                    ]
+                )
+                pipe.fit(X[train_idx], y[train_idx])
+                fold_accs.append(accuracy_score(y[val_idx], pipe.predict(X[val_idx])))
+            mean_acc = float(np.mean(fold_accs))
+            std_acc = float(np.std(fold_accs))
 
-        mean_acc = float(np.mean(fold_accs))
-        std_acc = float(np.std(fold_accs))
         sweep_results.append({"C": C, "mean_cv_acc": mean_acc, "std_cv_acc": std_acc})
 
         if mean_acc > best_mean_acc:
@@ -543,12 +676,14 @@ def evaluate_classification(
     model: Pipeline | LogisticRegression,
     features: torch.Tensor,
     labels: torch.Tensor,
+    pathology_classes: dict[str, int] | None = None,
 ) -> dict:
     """Evaluate a fitted classification pipeline or model.
 
     Args:
         model: A sklearn Pipeline (StandardScaler + LogisticRegression)
                or a bare LogisticRegression.
+        pathology_classes: {class_name: int_label} mapping. Defaults to ACDC classes.
 
     Returns:
         Dict with keys: accuracy, macro_f1,
@@ -556,6 +691,10 @@ def evaluate_classification(
         macro_specificity, confusion_matrix, classification_report,
         predictions, probabilities.
     """
+    if pathology_classes is None:
+        pathology_classes = PATHOLOGY_CLASSES
+    num_classes = len(pathology_classes)
+
     X = features.numpy()
     y_true = labels.numpy()
 
@@ -564,14 +703,14 @@ def evaluate_classification(
 
     acc = accuracy_score(y_true, y_pred)
 
-    cm = confusion_matrix(y_true, y_pred, labels=list(range(NUM_PATHOLOGIES)))
+    cm = confusion_matrix(y_true, y_pred, labels=list(range(num_classes)))
 
     # Per-class sensitivity (TPR) and specificity (TNR)
     per_class_sensitivity: dict[str, float] = {}
     per_class_specificity: dict[str, float] = {}
     total = cm.sum()
 
-    for cls_name, cls_idx in PATHOLOGY_CLASSES.items():
+    for cls_name, cls_idx in pathology_classes.items():
         tp = cm[cls_idx, cls_idx]
         fn = cm[cls_idx, :].sum() - tp
         fp = cm[:, cls_idx].sum() - tp
@@ -594,8 +733,8 @@ def evaluate_classification(
     report = classification_report(
         y_true,
         y_pred,
-        labels=list(range(NUM_PATHOLOGIES)),
-        target_names=list(PATHOLOGY_CLASSES.keys()),
+        labels=list(range(num_classes)),
+        target_names=list(pathology_classes.keys()),
         output_dict=True,
     )
     macro_f1 = f1_score(y_true, y_pred, average="macro")
@@ -615,30 +754,31 @@ def evaluate_classification(
 
 
 # ── Binary Disease Detection ─────────────────────────────────────────────────
-def binarize_labels(labels: torch.Tensor) -> torch.Tensor:
-    """Map 5-way labels to binary: NOR (0) → 0, all disease → 1."""
-    return (labels != PATHOLOGY_CLASSES["NOR"]).long()
+def binarize_labels(labels: torch.Tensor, nor_idx: int = 0) -> torch.Tensor:
+    """Map multi-class labels to binary: NOR → 0, all disease → 1."""
+    return (labels != nor_idx).long()
 
 
 def evaluate_binary_detection(
     probabilities: np.ndarray,
     labels: torch.Tensor,
+    nor_idx: int = 0,
 ) -> dict:
-    """Evaluate binary disease detection from 5-way class probabilities.
+    """Evaluate binary disease detection from multi-class probabilities.
 
-    Derives binary disease probability as ``1 - P(NOR)`` from the 5-way
+    Derives binary disease probability as ``1 - P(NOR)`` from the
     softmax output, so no retraining is needed.
 
     Args:
-        probabilities: (N, 5) array of class probabilities from the 5-way model.
-        labels: (N,) tensor of 5-way integer labels.
+        probabilities: (N, C) array of class probabilities from the multi-class model.
+        labels: (N,) tensor of integer labels.
+        nor_idx: Column index for the NOR (normal) class. Defaults to 0.
 
     Returns:
         Dict with keys: accuracy, f1, sensitivity, specificity, roc_auc,
         binary_probs, binary_labels, binary_predictions.
     """
-    nor_idx = PATHOLOGY_CLASSES["NOR"]
-    y_binary = binarize_labels(labels).numpy()
+    y_binary = binarize_labels(labels, nor_idx=nor_idx).numpy()
     disease_prob = 1.0 - probabilities[:, nor_idx]
     y_pred = (disease_prob >= 0.5).astype(int)
 
