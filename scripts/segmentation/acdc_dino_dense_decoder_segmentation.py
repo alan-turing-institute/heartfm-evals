@@ -46,7 +46,7 @@ parser.add_argument(
 args = parser.parse_args()
 
 # -- Paths --
-ACDC_DATA_DIR = Path("/home/rwood/heartfm/data-evals/acdc/")
+ACDC_DATA_DIR = Path("/Users/lbokeria/projects/health_gc/data/heartfm/processed/acdc/")
 REPO_DIR = "../../models/dinov3/"
 
 # -- Backbone selection --
