@@ -1,5 +1,6 @@
 {
   "config": {
+    "dataset": "acdc",
     "backbone": "cinema",
     "model_name": "cinema_pretrained",
     "eval_mode": "logreg",
@@ -7,7 +8,15 @@
     "pooling": "cls",
     "embed_dim": 768,
     "best_hyperparam": 0.005623413249850273,
-    "hyperparam_name": "C"
+    "hyperparam_name": "C",
+    "num_classes": 5,
+    "class_names": [
+      "NOR",
+      "DCM",
+      "HCM",
+      "MINF",
+      "RV"
+    ]
   },
   "sweep_results": [
     {
