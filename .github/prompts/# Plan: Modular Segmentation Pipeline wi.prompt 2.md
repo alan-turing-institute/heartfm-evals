@@ -191,10 +191,10 @@ Each YAML specifies: name, data_dir, num_classes, class_names, val_split strateg
 - Entry point with `@hydra.main(version_base=None, config_path="../../configs/segmentation", config_name="config")`
 - Pipeline stages:
   1. Set seed
-  2. `backbone = load_backbone(cfg.backbone)` 
+  2. `backbone = load_backbone(cfg.backbone)`
   3. `train_ds, val_ds, test_ds, metadata = load_dataset(cfg.dataset)`
   4. If `cfg.training.cache_features`:
-     - `manifest = cache_features(backbone, datasets, cfg)` 
+     - `manifest = cache_features(backbone, datasets, cfg)`
      - Build `CachedFeatureDataset` / `CachedVolumeDataset` from manifest
   5. Else (fine-tuning):
      - Build `RawVolumeDataset` / `ACDCSliceDataset` directly

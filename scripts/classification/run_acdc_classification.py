@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""CLI script for ACDC pathology classification evaluation.
+"""[DEPRECATED] CLI script for ACDC pathology classification evaluation.
+
+.. deprecated::
+    Use ``scripts/classification/run_classification.py --dataset acdc`` instead.
 
 Runs the full pipeline (load data, load backbone, train, evaluate) and saves
 results as both a Markdown summary and a JSON file containing all data needed
