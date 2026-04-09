@@ -150,17 +150,17 @@ def main() -> None:
     # ── Load backbone ──
     backbone_kwargs: dict = {}
     if args.backbone == "dinov3":
-        backbone_kwargs["model_name"] = args.dinov3_model_name
-        backbone_kwargs["repo_dir"] = args.dinov3_repo_dir
+        backbone_kwargs["dinov3_model_name"] = args.dinov3_model_name
+        backbone_kwargs["dinov3_repo_dir"] = args.dinov3_repo_dir
         if args.dinov3_weights_path:
-            backbone_kwargs["weights_path"] = args.dinov3_weights_path
+            backbone_kwargs["dinov3_weights_path"] = args.dinov3_weights_path
     elif args.backbone == "sam2":
-        backbone_kwargs["model_id"] = args.sam2_model_id
-        backbone_kwargs["cache_dir"] = str(args.hf_cache_dir)
-        backbone_kwargs["local_files_only"] = args.no_auto_download
+        backbone_kwargs["sam2_model_id"] = args.sam2_model_id
+        backbone_kwargs["hf_cache_dir"] = str(args.hf_cache_dir)
+        backbone_kwargs["auto_download"] = not args.no_auto_download
     elif args.backbone == "cinema":
-        backbone_kwargs["cache_dir"] = str(args.hf_cache_dir)
-        backbone_kwargs["local_files_only"] = args.no_auto_download
+        backbone_kwargs["hf_cache_dir"] = str(args.hf_cache_dir)
+        backbone_kwargs["auto_download"] = not args.no_auto_download
 
     backbone, config = load_backbone(args.backbone, device, **backbone_kwargs)
     embed_dim = config["embed_dim"]
