@@ -105,7 +105,7 @@ def derive_cache_dir(args: argparse.Namespace, model_name: str) -> Path:
         return args.cache_dir
     suffix = "unetr3d" if args.decoder == "unetr" else ""
     name = f"{model_name}{'_' + suffix if suffix else ''}"
-    return Path(f"feature_cache/{name}")
+    return Path(f"feature_cache/{args.dataset}/{name}")
 
 
 def compute_class_weights(

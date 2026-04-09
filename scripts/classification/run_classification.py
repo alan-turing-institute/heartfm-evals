@@ -343,7 +343,7 @@ def main():
 
     # ── Feature caching ──
     cls_cache_dir = args.cls_cache_dir or Path(
-        f"cls_feature_cache/{model_name}/{args.pooling}"
+        f"cls_feature_cache/{args.dataset}/{model_name}/{args.pooling}"
     )
 
     if args.backbone == "cinema":
