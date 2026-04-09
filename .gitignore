@@ -161,7 +161,7 @@ Thumbs.db
 # models/
 model_weights/
 feature_cache/
-cls_feature_cache/
+classification_feature_cache/
 linear_feature_cache/
 
 .vscode/
@@ -181,7 +181,7 @@ scripts/**/*.pt
 scripts/**/*.png
 scripts/**/*.out
 
-cls_feature_cache/
+classification_feature_cache/
 linear_feature_cache/
 feature_cache_old/
 
