@@ -25,7 +25,7 @@ from heartfm_evals.classification_probe import (
 )
 from heartfm_evals.finetune_classification import (
     ClassificationHead,
-    _group_samples_by_patient,
+    ClassificationHeadPredictor,
 )
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
@@ -40,15 +40,6 @@ def _make_cls_features(pids, embed_dim=8):
             "es_features": torch.randn(3, embed_dim),
         }
     return feats
-
-
-def _make_fake_cinema_dataset(patients: list[tuple[str, bool]]):
-    """Create a mock CineMA dataset. patients is [(pid, is_ed), ...]."""
-    dataset = MagicMock()
-    dataset.__len__ = MagicMock(return_value=len(patients))
-    samples = [{"pid": pid, "is_ed": is_ed} for pid, is_ed in patients]
-    dataset.__getitem__ = MagicMock(side_effect=lambda i: samples[i])
-    return dataset
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -364,33 +355,36 @@ class TestFinetuneModule:
         out = head(x)
         assert out.shape == (2, 5)
 
-    def test_group_samples_by_patient_custom_classes(self):
-        mnm2_classes = get_pathology_classes("mnm2")
-        patients = [
-            ("p1", True),
-            ("p1", False),  # ED + ES for p1
-            ("p2", True),
-            ("p2", False),  # ED + ES for p2
-        ]
-        dataset = _make_fake_cinema_dataset(patients)
-        pathology_map = {"p1": "ARR", "p2": "LV"}
+    def test_classification_head_predictor_predict(self):
+        """ClassificationHeadPredictor.predict returns argmax predictions."""
+        from sklearn.preprocessing import StandardScaler
 
-        result = _group_samples_by_patient(
-            dataset, pathology_map, pathology_classes=mnm2_classes
-        )
+        head = ClassificationHead(in_dim=16, num_classes=5)
+        scaler = StandardScaler()
+        X_train = np.random.randn(10, 16)
+        scaler.fit(X_train)
 
-        assert len(result) == 2
-        labels = {r["pid"]: r["label"] for r in result}
-        assert labels["p1"] == mnm2_classes["ARR"]  # 2
-        assert labels["p2"] == mnm2_classes["LV"]  # 5
+        predictor = ClassificationHeadPredictor(head, scaler, torch.device("cpu"))
+        X_test = np.random.randn(4, 16).astype(np.float64)
+        preds = predictor.predict(X_test)
+        assert preds.shape == (4,)
+        assert all(0 <= p < 5 for p in preds)
 
-    def test_group_samples_default_uses_acdc(self):
-        patients = [("p1", True), ("p1", False)]
-        dataset = _make_fake_cinema_dataset(patients)
-        pathology_map = {"p1": "MINF"}
+    def test_classification_head_predictor_predict_proba(self):
+        """ClassificationHeadPredictor.predict_proba returns softmax probabilities."""
+        from sklearn.preprocessing import StandardScaler
 
-        result = _group_samples_by_patient(dataset, pathology_map)
-        assert result[0]["label"] == 3  # MINF=3 in ACDC
+        head = ClassificationHead(in_dim=16, num_classes=5)
+        scaler = StandardScaler()
+        X_train = np.random.randn(10, 16)
+        scaler.fit(X_train)
+
+        predictor = ClassificationHeadPredictor(head, scaler, torch.device("cpu"))
+        X_test = np.random.randn(4, 16).astype(np.float64)
+        probs = predictor.predict_proba(X_test)
+        assert probs.shape == (4, 5)
+        # Each row should sum to ~1.0 (softmax)
+        np.testing.assert_allclose(probs.sum(axis=1), 1.0, atol=1e-6)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
