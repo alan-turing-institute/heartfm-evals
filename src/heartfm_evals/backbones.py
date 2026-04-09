@@ -68,6 +68,7 @@ SAM2_CONFIGS: dict[str, dict[str, Any]] = {
 
 # ── Public helpers ─────────────────────────────────────────────────────────────
 
+
 def _freeze(model: nn.Module) -> nn.Module:
     """Set model to eval mode and freeze all parameters."""
     model.eval()
@@ -130,6 +131,7 @@ def load_backbone(
 
 # ── Private loaders ────────────────────────────────────────────────────────────
 
+
 def _load_dinov3(
     model_name: str,
     repo_dir: str,
@@ -187,10 +189,14 @@ def _load_sam(
     from transformers import SamImageProcessor, SamModel
 
     processor = SamImageProcessor.from_pretrained(
-        model_id, cache_dir=str(hf_cache_dir), local_files_only=not auto_download,
+        model_id,
+        cache_dir=str(hf_cache_dir),
+        local_files_only=not auto_download,
     )
     backbone = SamModel.from_pretrained(
-        model_id, cache_dir=str(hf_cache_dir), local_files_only=not auto_download,
+        model_id,
+        cache_dir=str(hf_cache_dir),
+        local_files_only=not auto_download,
     )
     embed_dim: int = backbone.config.vision_config.hidden_size
     _freeze(backbone).to(device)
@@ -211,10 +217,14 @@ def _load_sam2(
     cfg = SAM2_CONFIGS[model_id]
 
     processor = Sam2Processor.from_pretrained(
-        model_id, cache_dir=str(hf_cache_dir), local_files_only=not auto_download,
+        model_id,
+        cache_dir=str(hf_cache_dir),
+        local_files_only=not auto_download,
     )
     backbone = Sam2Model.from_pretrained(
-        model_id, cache_dir=str(hf_cache_dir), local_files_only=not auto_download,
+        model_id,
+        cache_dir=str(hf_cache_dir),
+        local_files_only=not auto_download,
     )
     _freeze(backbone).to(device)
 

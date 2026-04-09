@@ -16,7 +16,6 @@ import json
 import math
 from pathlib import Path
 
-
 # ── Recursive comparison ─────────────────────────────────────────────────────
 
 
@@ -54,7 +53,13 @@ def compare_values(
                 only_in_new.append(child_path)
             else:
                 compare_values(
-                    old[key], new[key], child_path, tolerance, mismatches, only_in_old, only_in_new
+                    old[key],
+                    new[key],
+                    child_path,
+                    tolerance,
+                    mismatches,
+                    only_in_old,
+                    only_in_new,
                 )
 
     elif isinstance(old, list) and isinstance(new, list):
@@ -71,7 +76,13 @@ def compare_values(
             n = len(old)
         for i in range(n):
             compare_values(
-                old[i], new[i], f"{path}[{i}]", tolerance, mismatches, only_in_old, only_in_new
+                old[i],
+                new[i],
+                f"{path}[{i}]",
+                tolerance,
+                mismatches,
+                only_in_old,
+                only_in_new,
             )
 
     elif isinstance(old, (int, float)) and isinstance(new, (int, float)):
@@ -124,7 +135,9 @@ def compare_files(old_path: Path, new_path: Path, tolerance: float) -> dict:
     only_in_old: list[str] = []
     only_in_new: list[str] = []
 
-    compare_values(old_data, new_data, "", tolerance, mismatches, only_in_old, only_in_new)
+    compare_values(
+        old_data, new_data, "", tolerance, mismatches, only_in_old, only_in_new
+    )
 
     return {
         "mismatches": mismatches,
@@ -137,7 +150,9 @@ def compare_files(old_path: Path, new_path: Path, tolerance: float) -> dict:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Compare new vs old classification results.")
+    parser = argparse.ArgumentParser(
+        description="Compare new vs old classification results."
+    )
     parser.add_argument(
         "--new-dir",
         type=Path,
@@ -201,7 +216,9 @@ def main() -> None:
             print(f"FAIL  {rel}")
             for m in mismatches:
                 if "delta" in m:
-                    print(f"  {m['path']}: old={m['old']}, new={m['new']}, delta={m['delta']:.6g}")
+                    print(
+                        f"  {m['path']}: old={m['old']}, new={m['new']}, delta={m['delta']:.6g}"
+                    )
                 else:
                     print(f"  {m['path']}: {m.get('reason', '')}")
         else:
@@ -215,7 +232,9 @@ def main() -> None:
 
     print("=" * 72)
     total = passed + failed + skipped
-    print(f"\nSummary: {total} file(s) checked — {passed} passed, {failed} failed, {skipped} skipped")
+    print(
+        f"\nSummary: {total} file(s) checked — {passed} passed, {failed} failed, {skipped} skipped"
+    )
 
     raise SystemExit(1 if failed else 0)
 

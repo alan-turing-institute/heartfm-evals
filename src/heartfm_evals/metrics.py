@@ -23,4 +23,6 @@ def macro_dice(
 ) -> float:
     """Macro-averaged Dice across foreground classes."""
     start = 1 if exclude_bg else 0
-    return float(np.mean([dice_score(pred, true, c) for c in range(start, num_classes)]))
+    return float(
+        np.mean([dice_score(pred, true, c) for c in range(start, num_classes)])
+    )

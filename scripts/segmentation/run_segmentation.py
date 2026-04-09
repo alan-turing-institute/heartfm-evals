@@ -215,16 +215,28 @@ def main() -> None:
             )
         else:  # sam2
             train_manifest = cache_sam_volume_features(
-                backbone, sam_processor, train_ds, cache_dir / "train",
-                layer_indices, device
+                backbone,
+                sam_processor,
+                train_ds,
+                cache_dir / "train",
+                layer_indices,
+                device,
             )
             val_manifest = cache_sam_volume_features(
-                backbone, sam_processor, val_ds, cache_dir / "val",
-                layer_indices, device
+                backbone,
+                sam_processor,
+                val_ds,
+                cache_dir / "val",
+                layer_indices,
+                device,
             )
             test_manifest = cache_sam_volume_features(
-                backbone, sam_processor, test_ds, cache_dir / "test",
-                layer_indices, device
+                backbone,
+                sam_processor,
+                test_ds,
+                cache_dir / "test",
+                layer_indices,
+                device,
             )
     else:
         # 2D slice caching

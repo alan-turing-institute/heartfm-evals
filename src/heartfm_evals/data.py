@@ -22,6 +22,7 @@ _imagenet_normalize = imagenet_normalize
 
 # ── Public dataset loader ──────────────────────────────────────────────────────
 
+
 def load_segmentation_datasets(
     dataset_name: str,
     data_dir: str | Path,
@@ -68,12 +69,8 @@ def load_segmentation_datasets(
     dataset_name = dataset_name.lower()
 
     # ── read metadata ──
-    train_meta_df = pd.read_csv(
-        data_dir / "train_metadata.csv", dtype={"pid": str}
-    )
-    test_meta_df = pd.read_csv(
-        data_dir / "test_metadata.csv", dtype={"pid": str}
-    )
+    train_meta_df = pd.read_csv(data_dir / "train_metadata.csv", dtype={"pid": str})
+    test_meta_df = pd.read_csv(data_dir / "test_metadata.csv", dtype={"pid": str})
 
     val_meta_path = data_dir / "val_metadata.csv"
     has_val_split = val_meta_path.exists()
@@ -90,21 +87,19 @@ def load_segmentation_datasets(
                 .tolist()
             )
         else:
-            val_pids = train_meta_df.sample(
-                frac=0.1, random_state=split_seed
-            )["pid"].tolist()
+            val_pids = train_meta_df.sample(frac=0.1, random_state=split_seed)[
+                "pid"
+            ].tolist()
 
         train_split_df = train_meta_df[
             ~train_meta_df["pid"].isin(val_pids)
         ].reset_index(drop=True)
-        val_meta_df = train_meta_df[
-            train_meta_df["pid"].isin(val_pids)
-        ].reset_index(drop=True)
+        val_meta_df = train_meta_df[train_meta_df["pid"].isin(val_pids)].reset_index(
+            drop=True
+        )
 
     # ── shared transform ──
-    transform = ScaleIntensityd(
-        keys="sax_image", factor=1 / 255, channel_wise=False
-    )
+    transform = ScaleIntensityd(keys="sax_image", factor=1 / 255, channel_wise=False)
 
     # ── train / val / test datasets ──
     # For ACDC val comes from the *train* directory; for M&M/M&M2 it has its
@@ -134,6 +129,7 @@ def load_segmentation_datasets(
 
 
 # ── Slice-level wrapper ───────────────────────────────────────────────────────
+
 
 class ACDCSliceDataset(Dataset):
     """Wraps a CineMA ``EndDiastoleEndSystoleDataset`` to yield individual 2-D slices.

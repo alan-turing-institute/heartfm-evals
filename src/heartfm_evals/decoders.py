@@ -66,7 +66,7 @@ class DenseLinearProbe(nn.Module):
         nn.init.normal_(self.head.weight, mean=0, std=0.01)
         nn.init.constant_(self.head.bias, 0)
 
-    def forward(self, features: "torch.Tensor") -> "torch.Tensor":
+    def forward(self, features: torch.Tensor) -> torch.Tensor:
         """
         Args:
             features: Pre-extracted concatenated features (B, C, h, w)
@@ -111,7 +111,7 @@ class ConvDecoderProbe(nn.Module):
         )
         self.head = nn.Conv2d(hidden_dim, num_classes, kernel_size=1)
 
-    def forward(self, features: "torch.Tensor") -> "torch.Tensor":
+    def forward(self, features: torch.Tensor) -> torch.Tensor:
         x = F.interpolate(
             features, size=self.output_size, mode="bilinear", align_corners=False
         )
@@ -207,7 +207,7 @@ class DINOv3UNetRDecoder(nn.Module):
         # Prediction head
         self.pred_head = nn.Conv3d(dec_chans[0], num_classes, kernel_size=1)
 
-    def forward(self, batch: "dict[str, torch.Tensor]") -> "torch.Tensor":
+    def forward(self, batch: dict[str, torch.Tensor]) -> torch.Tensor:
         """Forward pass.
 
         Args:
@@ -360,7 +360,7 @@ class CineMAUNetRDecoder(nn.Module):
         # Prediction head
         self.pred_head = nn.Conv3d(dec_chans[0], num_classes, kernel_size=1)
 
-    def forward(self, batch: "dict[str, torch.Tensor]") -> "torch.Tensor":
+    def forward(self, batch: dict[str, torch.Tensor]) -> torch.Tensor:
         """Forward pass.
 
         Args:

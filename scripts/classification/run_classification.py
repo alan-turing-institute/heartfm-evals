@@ -7,7 +7,7 @@ to regenerate plots.
 
 Usage examples:
     python scripts/classification/run_classification.py --dataset acdc --backbone cinema --eval-mode logreg
-    python scripts/classification/run_classification.py --dataset mnm --backbone dinov3 --eval-mode finetune --no-freeze-backbone
+    python scripts/classification/run_classification.py --dataset mnm --backbone dinov3 --eval-mode finetune
     python scripts/classification/run_classification.py --dataset mnm2 --backbone sam --eval-mode logreg --pooling gap
 """
 
@@ -41,6 +41,10 @@ from heartfm_evals.classification_probe import (
     validate_split_pathology_labels,
 )
 from heartfm_evals.device import detect_device as _detect_device
+from heartfm_evals.finetune_classification import (
+    evaluate_finetune_classification,
+    finetune_sweep_and_train,
+)
 
 # DINOv3 embed dims by model name
 DINOV3_EMBED_DIMS = {
@@ -55,6 +59,7 @@ def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Pathology classification evaluation")
     p.add_argument("--dataset", default="acdc", choices=["acdc", "mnm", "mnm2"])
     p.add_argument("--backbone", required=True, choices=["cinema", "dinov3", "sam"])
+    p.add_argument("--eval-mode", required=True, choices=["logreg", "finetune"])
     p.add_argument("--pooling", default="cls", choices=["cls", "gap"])
     p.add_argument(
         "--data-dir",
@@ -113,6 +118,13 @@ def derive_model_name(args) -> str:
     if args.backbone == "sam":
         return args.sam_model_id.split("/")[-1].replace("-", "_")
     return args.dinov3_model_name
+
+
+def eval_mode_tag(eval_mode: str, freeze_backbone: bool) -> str:
+    """Return a short tag string for the evaluation mode."""
+    if eval_mode == "logreg":
+        return "logreg"
+    return "ftfrozen" if freeze_backbone else "ftfull"
 
 
 def load_backbone(args, device):
@@ -196,11 +208,11 @@ def build_results_dict(
             "dataset": args.dataset,
             "backbone": args.backbone,
             "model_name": model_name,
-            "eval_mode": "logreg",
+            "eval_mode": args.eval_mode,
             "pooling": args.pooling,
             "embed_dim": embed_dim,
             "best_hyperparam": best_hyperparam,
-            "hyperparam_name": "C",
+            "hyperparam_name": "C" if args.eval_mode == "logreg" else "lr",
             "num_classes": len(pathology_classes),
             "class_names": list(pathology_classes.keys()),
         },
@@ -250,7 +262,8 @@ def build_results_dict(
 def main():
     args = parse_args()
     model_name = derive_model_name(args)
-    base_name = f"{model_name}_logreg_{args.pooling}"
+    tag = eval_mode_tag(args.eval_mode, True)
+    base_name = f"{model_name}_{tag}_{args.pooling}"
     if args.max_patients:
         base_name += "_smoke"
 
@@ -270,7 +283,7 @@ def main():
     )
     print(f"Device: {device}")
     print(f"Backbone: {args.backbone} ({model_name})")
-    print("Eval mode: logreg (frozen backbone)")
+    print(f"Eval mode: {args.eval_mode}")
     print(f"Pooling: {args.pooling}")
 
     # ── Load metadata and datasets ──
@@ -341,78 +354,117 @@ def main():
         test_pathology_map=test_pathology_map,
     )
 
-    # ── Feature caching ──
-    cls_cache_dir = args.cls_cache_dir or Path(
-        f"classification_feature_cache/{args.dataset}/{model_name}/{args.pooling}"
-    )
-
-    if args.backbone == "cinema":
-        cache_fn = lambda m, ds, cd, dev: cache_cinema_cls_features(
-            m, ds, cd, device=dev, pooling=args.pooling
-        )
-    elif args.backbone == "sam":
-        cache_fn = lambda m, ds, cd, dev: cache_sam_cls_features(
-            m, sam_image_processor, ds, cd, device=dev
-        )
-    else:
-        cache_fn = lambda m, ds, cd, dev: cache_cls_features(
-            m, ds, cd, device=dev, pooling=args.pooling
-        )
-
-    print("Caching training features...")
-    train_manifest = cache_fn(backbone, train_cinema, cls_cache_dir / "train", device)
-    print("Caching test features...")
-    test_manifest = cache_fn(backbone, test_cinema, cls_cache_dir / "test", device)
-
-    train_cls = load_cached_cls_features(train_manifest)
-    test_cls = load_cached_cls_features(test_manifest)
-
-    train_features, train_labels, train_pids = build_patient_features(
-        train_cls,
-        train_pathology_map,
-        pathology_classes=pathology_classes,
-    )
-    test_features, test_labels, test_pids = build_patient_features(
-        test_cls,
-        test_pathology_map,
-        pathology_classes=pathology_classes,
-    )
-    print(f"Feature shape: {train_features.shape}")
-
-    # Cache val features if val split exists
-    val_features, val_labels = None, None
-    if has_val_split:
-        print("Caching val features...")
-        val_manifest = cache_fn(backbone, val_cinema, cls_cache_dir / "val", device)
-        val_cls = load_cached_cls_features(val_manifest)
-        val_features, val_labels, _ = build_patient_features(
-            val_cls,
-            val_pathology_map,
-            pathology_classes=pathology_classes,
-        )
-
     # ── Train ──
     print("Training...")
-    best_C, final_model, sweep_results = sweep_C_and_train(
-        train_features,
-        train_labels,
-        n_folds=10,
-        val_features=val_features,
-        val_labels=val_labels,
-    )
-    best_hyperparam = best_C
-    print(f"Best C = {best_C:.4g}")
+    if args.eval_mode == "logreg":
+        # ── Feature caching (logreg only) ──
+        cls_cache_dir = args.cls_cache_dir or Path(
+            f"classification_feature_cache/{args.dataset}/{model_name}/{args.pooling}"
+        )
+
+        if args.backbone == "cinema":
+            cache_fn = lambda m, ds, cd, dev: cache_cinema_cls_features(
+                m, ds, cd, device=dev, pooling=args.pooling
+            )
+        elif args.backbone == "sam":
+            cache_fn = lambda m, ds, cd, dev: cache_sam_cls_features(
+                m, sam_image_processor, ds, cd, device=dev
+            )
+        else:
+            cache_fn = lambda m, ds, cd, dev: cache_cls_features(
+                m, ds, cd, device=dev, pooling=args.pooling
+            )
+
+        print("Caching training features...")
+        train_manifest = cache_fn(
+            backbone, train_cinema, cls_cache_dir / "train", device
+        )
+        print("Caching test features...")
+        test_manifest = cache_fn(backbone, test_cinema, cls_cache_dir / "test", device)
+
+        train_cls = load_cached_cls_features(train_manifest)
+        test_cls = load_cached_cls_features(test_manifest)
+
+        train_features, train_labels, train_pids = build_patient_features(
+            train_cls,
+            train_pathology_map,
+            pathology_classes=pathology_classes,
+        )
+        test_features, test_labels, test_pids = build_patient_features(
+            test_cls,
+            test_pathology_map,
+            pathology_classes=pathology_classes,
+        )
+        print(f"Feature shape: {train_features.shape}")
+
+        # Cache val features if val split exists
+        val_features, val_labels = None, None
+        if has_val_split:
+            print("Caching val features...")
+            val_manifest = cache_fn(backbone, val_cinema, cls_cache_dir / "val", device)
+            val_cls = load_cached_cls_features(val_manifest)
+            val_features, val_labels, _ = build_patient_features(
+                val_cls,
+                val_pathology_map,
+                pathology_classes=pathology_classes,
+            )
+
+        best_C, final_model, sweep_results = sweep_C_and_train(
+            train_features,
+            train_labels,
+            n_folds=10,
+            val_features=val_features,
+            val_labels=val_labels,
+        )
+        best_hyperparam = best_C
+        print(f"Best C = {best_C:.4g}")
+    else:
+        image_proc = sam_image_processor if args.backbone == "sam" else None
+        best_lr, backbone, ft_head, sweep_results, ft_scaler = finetune_sweep_and_train(
+            backbone=backbone,
+            cinema_dataset=train_cinema,
+            pathology_map=train_pathology_map,
+            embed_dim=embed_dim,
+            device=device,
+            backbone_type=args.backbone,
+            image_processor=image_proc,
+            n_folds=10,
+            pooling=args.pooling,
+            num_classes=num_classes,
+            pathology_classes=pathology_classes,
+            val_cinema_dataset=val_cinema,
+            val_pathology_map=val_pathology_map,
+        )
+        best_hyperparam = best_lr
+        print(f"Best LR = {best_lr:.4g}")
 
     # ── Evaluate 5-way ──
     print("Evaluating...")
-    test_metrics = evaluate_classification(
-        final_model,
-        test_features,
-        test_labels,
-        pathology_classes=pathology_classes,
-    )
-    test_pids_eval = test_pids
-    test_labels_eval = test_labels
+    if args.eval_mode == "logreg":
+        test_metrics = evaluate_classification(
+            final_model,
+            test_features,
+            test_labels,
+            pathology_classes=pathology_classes,
+        )
+        test_pids_eval = test_pids
+        test_labels_eval = test_labels
+    else:
+        image_proc = sam_image_processor if args.backbone == "sam" else None
+        test_metrics = evaluate_finetune_classification(
+            backbone,
+            ft_head,
+            test_cinema,
+            test_pathology_map,
+            device,
+            args.backbone,
+            image_processor=image_proc,
+            scaler=ft_scaler,
+            pooling=args.pooling,
+            pathology_classes=pathology_classes,
+        )
+        test_pids_eval = test_metrics["pids"]
+        test_labels_eval = torch.tensor(test_metrics["labels"], dtype=torch.long)
 
     print(
         f"5-way Accuracy: {test_metrics['accuracy']:.4f}, Macro F1: {test_metrics['macro_f1']:.4f}"

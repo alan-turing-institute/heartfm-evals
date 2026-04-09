@@ -16,7 +16,6 @@ from heartfm_evals.constants import CLASS_NAMES, NUM_CLASSES
 from heartfm_evals.losses import MaskedVolumeLoss
 from heartfm_evals.metrics import dice_score, macro_dice
 
-
 # ── Helpers ──────────────────────────────────────────────────────────────────
 _NON_MODEL_KEYS = {"label", "n_slices", "pid"}
 

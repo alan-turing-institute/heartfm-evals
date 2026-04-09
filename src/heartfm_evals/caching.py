@@ -381,9 +381,7 @@ def cache_cinema_2d_features(
             label_2d = label_3d[0, :, :, z_idx]
 
             torch.save({"features": feats_2d, "label": label_2d.long()}, fpath)
-            manifest.append(
-                {"path": fpath, "pid": pid, "is_ed": is_ed, "z_idx": z_idx}
-            )
+            manifest.append({"path": fpath, "pid": pid, "is_ed": is_ed, "z_idx": z_idx})
 
     return manifest
 
@@ -412,9 +410,7 @@ def cache_sam2_2d_features(
     cache_dir.mkdir(parents=True, exist_ok=True)
     manifest: list[dict] = []
 
-    for sample_idx in tqdm(
-        range(len(cinema_dataset)), desc="Caching SAM2 2D features"
-    ):
+    for sample_idx in tqdm(range(len(cinema_dataset)), desc="Caching SAM2 2D features"):
         sample = cinema_dataset[sample_idx]
         image_3d = sample["sax_image"]  # (1, H, W, z)
         label_3d = sample["sax_label"]  # (1, H, W, z)
@@ -441,9 +437,7 @@ def cache_sam2_2d_features(
             )
 
             torch.save({"features": feats, "label": label_2d.long()}, fpath)
-            manifest.append(
-                {"path": fpath, "pid": pid, "is_ed": is_ed, "z_idx": z_idx}
-            )
+            manifest.append({"path": fpath, "pid": pid, "is_ed": is_ed, "z_idx": z_idx})
 
     return manifest
 
