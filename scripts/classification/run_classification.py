@@ -14,7 +14,6 @@ Usage examples:
 from __future__ import annotations
 
 import argparse
-import glob
 import json
 from pathlib import Path
 
@@ -26,6 +25,7 @@ from monai.transforms import ScaleIntensityd
 from sklearn.metrics import roc_auc_score
 from sklearn.preprocessing import label_binarize
 
+from heartfm_evals.backbones import load_backbone as _load_backbone
 from heartfm_evals.classification_probe import (
     build_patient_features,
     cache_cinema_cls_features,
@@ -44,14 +44,6 @@ from heartfm_evals.finetune_classification import (
     ClassificationHeadPredictor,
     finetune_sweep_and_train,
 )
-
-# DINOv3 embed dims by model name
-DINOV3_EMBED_DIMS = {
-    "dinov3_vits16": 384,
-    "dinov3_vitb16": 768,
-    "dinov3_vitl16": 1024,
-    "dinov3_vit7b16": 4096,
-}
 
 
 def parse_args() -> argparse.Namespace:
@@ -124,61 +116,6 @@ def eval_mode_tag(eval_mode: str, freeze_backbone: bool) -> str:
     if eval_mode == "logreg":
         return "logreg"
     return "ftfrozen" if freeze_backbone else "ftfull"
-
-
-def load_backbone(args, device):
-    """Load backbone model and return (backbone, embed_dim, sam_image_processor_or_None)."""
-    sam_image_processor = None
-    auto_download = not args.no_auto_download
-
-    if args.backbone == "cinema":
-        from cinema import CineMA
-
-        args.hf_cache_dir.mkdir(parents=True, exist_ok=True)
-        backbone = CineMA.from_pretrained(
-            cache_dir=str(args.hf_cache_dir),
-            local_files_only=not auto_download,
-        )
-        embed_dim = backbone.enc_down_dict["sax"].patch_embed.proj.out_features
-
-    elif args.backbone == "sam":
-        from transformers import SamImageProcessor, SamModel
-
-        args.hf_cache_dir.mkdir(parents=True, exist_ok=True)
-        sam_image_processor = SamImageProcessor.from_pretrained(
-            args.sam_model_id,
-            cache_dir=str(args.hf_cache_dir),
-            local_files_only=not auto_download,
-        )
-        backbone = SamModel.from_pretrained(
-            args.sam_model_id,
-            cache_dir=str(args.hf_cache_dir),
-            local_files_only=not auto_download,
-        )
-        embed_dim = backbone.config.vision_config.hidden_size
-
-    else:  # dinov3
-        if args.dinov3_weights_path:
-            weights_path = args.dinov3_weights_path
-        else:
-            # Match exact name or name with hash suffix (e.g. dinov3_vitl16-8aa4cbdd.pth)
-            candidates = glob.glob(f"model_weights/{args.dinov3_model_name}*.pth")
-            weights_path = candidates[0] if candidates else None
-        if weights_path is None or not Path(weights_path).exists():
-            print(
-                f"Weights not found for {args.dinov3_model_name}, downloading from default source..."
-            )
-            weights_path = None
-        backbone = torch.hub.load(
-            args.dinov3_repo_dir,
-            args.dinov3_model_name,
-            source="local",
-            weights=weights_path,
-        )
-        embed_dim = DINOV3_EMBED_DIMS[args.dinov3_model_name]
-
-    backbone.eval().to(device)
-    return backbone, embed_dim, sam_image_processor
 
 
 def build_results_dict(
@@ -333,12 +270,24 @@ def main():
         )
 
     # ── Load backbone ──
-    backbone, embed_dim, sam_image_processor = load_backbone(args, device)
-    print(f"Loaded backbone: embed_dim={embed_dim}")
+    backbone_kwargs: dict = {}
+    if args.backbone == "dinov3":
+        backbone_kwargs["dinov3_model_name"] = args.dinov3_model_name
+        backbone_kwargs["dinov3_repo_dir"] = args.dinov3_repo_dir
+        if args.dinov3_weights_path:
+            backbone_kwargs["dinov3_weights_path"] = args.dinov3_weights_path
+    elif args.backbone == "sam":
+        backbone_kwargs["sam_model_id"] = args.sam_model_id
+        backbone_kwargs["hf_cache_dir"] = str(args.hf_cache_dir)
+        backbone_kwargs["auto_download"] = not args.no_auto_download
+    elif args.backbone == "cinema":
+        backbone_kwargs["hf_cache_dir"] = str(args.hf_cache_dir)
+        backbone_kwargs["auto_download"] = not args.no_auto_download
 
-    # Freeze backbone (frozen-only policy)
-    for p in backbone.parameters():
-        p.requires_grad = False
+    backbone, info = _load_backbone(args.backbone, device, **backbone_kwargs)
+    embed_dim = info["embed_dim"]
+    sam_image_processor = info.get("sam_image_processor")
+    print(f"Loaded backbone: embed_dim={embed_dim}")
 
     # ── Pathology maps ──
     train_pathology_map = get_pathology_map(train_meta_df)
