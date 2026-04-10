@@ -283,9 +283,10 @@ def main() -> None:
     # ── Build DataLoaders ──
     if is_volume:
         if args.backbone == "cinema":
-            train_cached = CachedCinemaVolumeDataset(train_manifest)
-            val_cached = CachedCinemaVolumeDataset(val_manifest)
-            test_cached = CachedCinemaVolumeDataset(test_manifest)
+            n_conv_skips = len(config.get("enc_conv_chans", (64, 128)))
+            train_cached = CachedCinemaVolumeDataset(train_manifest, n_conv_skips=n_conv_skips)
+            val_cached = CachedCinemaVolumeDataset(val_manifest, n_conv_skips=n_conv_skips)
+            test_cached = CachedCinemaVolumeDataset(test_manifest, n_conv_skips=n_conv_skips)
         else:
             train_cached = CachedVolumeDataset(train_manifest, layer_indices)
             val_cached = CachedVolumeDataset(val_manifest, layer_indices)

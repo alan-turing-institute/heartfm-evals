@@ -174,12 +174,17 @@ def _load_cinema(
         local_files_only=not auto_download,
     )
     embed_dim: int = backbone.enc_down_dict["sax"].patch_embed.proj.out_features
+    enc_conv_chans = tuple(
+        b.patch_embed.conv.out_channels
+        for b in backbone.enc_down_dict["sax"].conv_blocks
+    )
     _freeze(backbone).to(device)
 
     return backbone, {
         "backbone_type": "cinema",
         "model_name": "cinema_pretrained",
         "embed_dim": embed_dim,
+        "enc_conv_chans": enc_conv_chans,
     }
 
 
