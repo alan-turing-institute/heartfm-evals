@@ -49,7 +49,8 @@ parser.add_argument(
 args = parser.parse_args()
 
 # -- Paths --
-ACDC_DATA_DIR = Path("/home/rwood/heartfm/data-evals/acdc/")
+# ACDC_DATA_DIR = Path("/home/rwood/heartfm/data-evals/acdc/")
+ACDC_DATA_DIR = Path("../../../data/heartfm/processed/acdc/")  # adjust as needed
 REPO_DIR = "../../models/dinov3/"
 
 # -- Backbone selection --
@@ -69,14 +70,14 @@ DEC_SCALE_FACTOR = (2, 2, 1)
 Z_PAD = SAX_TARGET_DEPTH  # 16
 
 # -- Cache --
-CACHE_DIR = Path(f"../../feature_cache/{MODEL_NAME}_unetr3d")
+CACHE_DIR = Path(f"../../feature_cache_standalone/{MODEL_NAME}_unetr3d")
 
 # -- Training --
-BATCH_SIZE = 4  # volumes use ~16x more memory than 2D slices
+BATCH_SIZE = 1  # volumes use ~16x more memory than 2D slices
 LR = 1e-3
-WEIGHT_DECAY = 1e-4
-N_EPOCHS = 20
-PATIENCE = 10
+WEIGHT_DECAY = 1e-3
+N_EPOCHS = 1
+PATIENCE = 20
 
 # -- Device --
 if torch.backends.mps.is_available():

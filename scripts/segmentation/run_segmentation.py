@@ -116,6 +116,10 @@ def compute_class_weights(
     for entry in train_manifest:
         data = torch.load(entry["path"], weights_only=True)
         label = data["label"]
+        # For volume caches, exclude z-padded slices (label 0 = BG)
+        if "n_slices" in data:
+            ns = data["n_slices"]
+            label = label[..., :ns]
         class_counts += torch.bincount(label.long().reshape(-1), minlength=NUM_CLASSES)
 
     class_weights = class_counts.sum().float() / (
