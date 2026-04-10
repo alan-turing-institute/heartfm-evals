@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""CLI script for ACDC pathology classification evaluation.
+"""[DEPRECATED] CLI script for ACDC pathology classification evaluation.
+
+.. deprecated::
+    Use ``scripts/classification/run_classification.py --dataset acdc`` instead.
 
 Runs the full pipeline (load data, load backbone, train, evaluate) and saves
 results as both a Markdown summary and a JSON file containing all data needed
@@ -310,7 +313,7 @@ def main():
     # ── Feature caching (logreg only) ──
     if args.eval_mode == "logreg":
         cls_cache_dir = args.cls_cache_dir or Path(
-            f"cls_feature_cache/{model_name}/{args.pooling}"
+            f"classification_feature_cache/{args.dataset}/{model_name}/{args.pooling}"
         )
 
         if args.backbone == "cinema":
