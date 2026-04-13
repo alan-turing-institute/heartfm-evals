@@ -63,7 +63,7 @@ CACHE_DIR = Path("../../feature_cache/cinema_pretrained_unetr3d")
 # -- Training --
 BATCH_SIZE = 1  # volumes use ~16x more memory than 2D slices
 LR = 1e-3
-WEIGHT_DECAY = 1e-1
+WEIGHT_DECAY = 1e-4
 N_EPOCHS = 1
 PATIENCE = 20
 
