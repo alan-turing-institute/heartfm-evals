@@ -37,7 +37,8 @@ from heartfm_evals.dense_unetr_probe import (
 )
 
 # -- Paths --
-ACDC_DATA_DIR = Path("/home/rwood/heartfm/data-evals/acdc/")
+# ACDC_DATA_DIR = Path("/home/rwood/heartfm/data-evals/acdc/")
+ACDC_DATA_DIR = Path("../../../data/heartfm/processed/acdc/")
 
 # -- CineMA loading --
 HF_CACHE_DIR = Path("../../model_weights/hf")
@@ -63,7 +64,7 @@ CACHE_DIR = Path("../../feature_cache/cinema_pretrained_unetr3d")
 BATCH_SIZE = 4  # volumes use ~16x more memory than 2D slices
 LR = 1e-3
 WEIGHT_DECAY = 1e-4
-N_EPOCHS = 20
+N_EPOCHS = 1
 PATIENCE = 10
 
 # -- Device --
