@@ -1,0 +1,48 @@
+{
+  "config": {
+    "dataset": "acdc",
+    "backbone": "dinov3",
+    "model_name": "dinov3_vits16",
+    "decoder": "unetr",
+    "embed_dim": 384,
+    "cache_layers": [
+      3,
+      6,
+      9,
+      11
+    ],
+    "probe_layers": [
+      3,
+      6,
+      9,
+      11
+    ],
+    "lr": 0.001,
+    "weight_decay": 0.001,
+    "batch_size": 4,
+    "n_epochs": 1,
+    "patience": 20,
+    "seed": 0,
+    "trainable_params": 31016868
+  },
+  "per_class_dice": {
+    "BG": 0.9854010988807594,
+    "RV": 0.9216776170069105,
+    "MYO": 0.9522834034114505,
+    "LV": 0.8744490246196696
+  },
+  "macro_dice": 0.9161366816793435,
+  "training_history": {
+    "train_loss": [
+      1.0265306739343538
+    ],
+    "val_macro_dice": [
+      0.9301738035411534
+    ],
+    "lr": [
+      0.0
+    ]
+  },
+  "best_val_dice": 0.9301738035411534,
+  "best_epoch": 1
+}

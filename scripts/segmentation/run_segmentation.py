@@ -173,6 +173,9 @@ def main() -> None:
     # Determine which layers to use for probe
     if args.use_layers is not None:
         use_layers = tuple(args.use_layers)
+    elif args.backbone == "cinema" and not is_volume:
+        # CineMA 2D features are single-layer (ViT output only)
+        use_layers = (0,)
     elif args.decoder == "linear_probe":
         use_layers = (layer_indices[-1],)  # last layer only
     else:
@@ -305,7 +308,12 @@ def main() -> None:
     decoder_kwargs: dict = {}
     if args.decoder == "linear_probe":
         decoder_kwargs["dropout"] = args.dropout
-        decoder_kwargs["cached_layers"] = layer_indices
+        # Only set cached_layers when cache has more layers than the probe uses.
+        # Skip for CineMA 2D: its cache is a single tensor, not multi-layer.
+        if use_layers != layer_indices and not (
+            args.backbone == "cinema" and not is_volume
+        ):
+            decoder_kwargs["cached_layers"] = layer_indices
     decoder = get_decoder(
         decoder_type=args.decoder,
         backbone_type=args.backbone,

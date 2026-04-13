@@ -1,0 +1,45 @@
+{
+  "config": {
+    "dataset": "acdc",
+    "backbone": "cinema",
+    "model_name": "cinema_pretrained",
+    "decoder": "conv_decoder",
+    "embed_dim": 768,
+    "cache_layers": [
+      3,
+      6,
+      9,
+      11
+    ],
+    "probe_layers": [
+      0
+    ],
+    "lr": 0.001,
+    "weight_decay": 0.001,
+    "batch_size": 4,
+    "n_epochs": 1,
+    "patience": 20,
+    "seed": 0,
+    "trainable_params": 1033220
+  },
+  "per_class_dice": {
+    "BG": 0.9558950156685825,
+    "RV": 0.9540214371188174,
+    "MYO": 0.8485393379163767,
+    "LV": 0.894871728744492
+  },
+  "macro_dice": 0.899144167926562,
+  "training_history": {
+    "train_loss": [
+      0.9043263584996263
+    ],
+    "val_macro_dice": [
+      0.9057882803920467
+    ],
+    "lr": [
+      0.0
+    ]
+  },
+  "best_val_dice": 0.9057882803920467,
+  "best_epoch": 1
+}

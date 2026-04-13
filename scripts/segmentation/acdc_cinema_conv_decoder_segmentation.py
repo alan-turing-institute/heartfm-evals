@@ -34,7 +34,9 @@ from heartfm_evals.dense_linear_probe import (
 )
 
 # -- Paths --
-ACDC_DATA_DIR = Path("/home/rwood/heartfm/data-evals/acdc/")
+# ACDC_DATA_DIR = Path("/home/rwood/heartfm/data-evals/acdc/")
+ACDC_DATA_DIR = Path("../../../data/heartfm/processed/acdc/")  # adjust as needed
+
 
 # -- CineMA loading --
 HF_CACHE_DIR = Path("../../model_weights/hf")
@@ -46,11 +48,11 @@ CACHE_DIR = Path(f"../../feature_cache/{CACHE_NAME}")
 SAX_TARGET_DEPTH = 16  # CineMA pretrained SAX depth
 
 # -- Training --
-BATCH_SIZE = 16
+BATCH_SIZE = 1
 LR = 1e-3
-WEIGHT_DECAY = 1e-4
-N_EPOCHS = 20
-PATIENCE = 10
+WEIGHT_DECAY = 1e-3
+N_EPOCHS = 1
+PATIENCE = 20
 
 # -- Device --
 if torch.backends.mps.is_available():
