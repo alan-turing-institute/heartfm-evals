@@ -358,6 +358,19 @@ def cache_cinema_2d_features(
         is_ed = sample["is_ed"]
         frame = "ed" if is_ed else "es"
 
+        # Skip backbone forward pass if all slices are already cached
+        all_cached = all(
+            (cache_dir / f"{pid}_{frame}_z{z_idx:02d}.pt").exists()
+            for z_idx in range(n_slices)
+        )
+        if all_cached:
+            for z_idx in range(n_slices):
+                fpath = cache_dir / f"{pid}_{frame}_z{z_idx:02d}.pt"
+                manifest.append(
+                    {"path": fpath, "pid": pid, "is_ed": is_ed, "z_idx": z_idx}
+                )
+            continue
+
         feat_vol, used_depth = extract_cinema_2d_feature_volume(
             backbone, image_3d, device
         )
