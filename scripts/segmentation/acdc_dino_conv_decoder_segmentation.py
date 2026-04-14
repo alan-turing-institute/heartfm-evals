@@ -64,7 +64,7 @@ LAYER_INDICES = _cfg["layer_indices"]
 CACHE_DIR = Path(f"../../feature_cache/{MODEL_NAME}_decoder")
 
 # -- Training --
-BATCH_SIZE = 16
+BATCH_SIZE = 4
 LR = 1e-3
 WEIGHT_DECAY = 1e-4
 N_EPOCHS = 1

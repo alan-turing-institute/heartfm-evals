@@ -73,11 +73,11 @@ Z_PAD = SAX_TARGET_DEPTH  # 16
 CACHE_DIR = Path(f"../../feature_cache_standalone/{MODEL_NAME}_unetr3d")
 
 # -- Training --
-BATCH_SIZE = 1  # volumes use ~16x more memory than 2D slices
+BATCH_SIZE = 4  # volumes use ~16x more memory than 2D slices
 LR = 1e-3
 WEIGHT_DECAY = 1e-4
 N_EPOCHS = 1
-PATIENCE = 20
+PATIENCE = 10
 
 # -- Device --
 if torch.backends.mps.is_available():
@@ -112,6 +112,9 @@ val_split_df = train_meta_df[train_meta_df["pid"].isin(val_pids)].reset_index(dr
 print(f"Train split: {len(train_split_df)} patients")
 print(f"Val split:   {len(val_split_df)} patients")
 print(f"Test set:    {len(test_meta_df)} patients")
+
+# Print the validation patient IDs for reference
+print(f"Validation patient IDs: {val_pids}")
 
 transform = ScaleIntensityd(keys="sax_image", factor=1 / 255, channel_wise=False)
 

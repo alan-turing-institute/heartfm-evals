@@ -1,10 +1,10 @@
 {
   "config": {
     "dataset": "acdc",
-    "backbone": "cinema",
-    "model_name": "cinema_pretrained",
+    "backbone": "dinov3",
+    "model_name": "dinov3_vits16",
     "decoder": "unetr",
-    "embed_dim": 768,
+    "embed_dim": 384,
     "cache_layers": [
       3,
       6,
@@ -23,26 +23,26 @@
     "n_epochs": 1,
     "patience": 20,
     "seed": 0,
-    "trainable_params": 39083302
+    "trainable_params": 31016868
   },
   "per_class_dice": {
-    "BG": 0.9557958489527509,
-    "RV": 0.6463395765420912,
-    "MYO": 0.5225107778056152,
-    "LV": 0.8482310587909648
+    "BG": 0.9554228096430373,
+    "RV": 0.6234003834056321,
+    "MYO": 0.596391576308993,
+    "LV": 0.8233004405564402
   },
-  "macro_dice": 0.6723604710462237,
+  "macro_dice": 0.6810308000903551,
   "training_history": {
     "train_loss": [
-      1.3967869228786893
+      1.3959230581919353
     ],
     "val_macro_dice": [
-      0.6979510328192338
+      0.6784291228841685
     ],
     "lr": [
       0.0
     ]
   },
-  "best_val_dice": 0.6979510328192338,
+  "best_val_dice": 0.6784291228841685,
   "best_epoch": 1
 }

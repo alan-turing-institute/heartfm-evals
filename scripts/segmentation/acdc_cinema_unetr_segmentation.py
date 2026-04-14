@@ -61,11 +61,11 @@ Z_PAD = SAX_TARGET_DEPTH  # 16
 CACHE_DIR = Path("../../feature_cache/cinema_pretrained_unetr3d")
 
 # -- Training --
-BATCH_SIZE = 1  # volumes use ~16x more memory than 2D slices
+BATCH_SIZE = 4  # volumes use ~16x more memory than 2D slices
 LR = 1e-3
 WEIGHT_DECAY = 1e-4
 N_EPOCHS = 1
-PATIENCE = 20
+PATIENCE = 10
 
 # -- Device --
 if torch.backends.mps.is_available():

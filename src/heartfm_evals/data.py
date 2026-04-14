@@ -98,6 +98,8 @@ def load_segmentation_datasets(
             drop=True
         )
 
+        print('Validation PIDs (ACDC-style split):', val_pids)
+
     # ── shared transform ──
     transform = ScaleIntensityd(keys="sax_image", factor=1 / 255, channel_wise=False)
 
