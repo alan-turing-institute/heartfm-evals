@@ -50,7 +50,7 @@ SAX_TARGET_DEPTH = 16  # CineMA pretrained SAX depth
 # -- Training --
 BATCH_SIZE = 1
 LR = 1e-3
-WEIGHT_DECAY = 1e-3
+WEIGHT_DECAY = 1e-4
 N_EPOCHS = 1
 PATIENCE = 20
 

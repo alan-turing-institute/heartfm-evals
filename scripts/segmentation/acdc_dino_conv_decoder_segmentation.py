@@ -46,7 +46,8 @@ parser.add_argument(
 args = parser.parse_args()
 
 # -- Paths --
-ACDC_DATA_DIR = Path("/home/rwood/heartfm/data-evals/acdc/")
+# ACDC_DATA_DIR = Path("/home/rwood/heartfm/data-evals/acdc/")
+ACDC_DATA_DIR = Path("../../../data/heartfm/processed/acdc/")
 REPO_DIR = "../../models/dinov3/"
 
 # -- Backbone selection --
@@ -66,7 +67,7 @@ CACHE_DIR = Path(f"../../feature_cache/{MODEL_NAME}_decoder")
 BATCH_SIZE = 16
 LR = 1e-3
 WEIGHT_DECAY = 1e-4
-N_EPOCHS = 20
+N_EPOCHS = 1
 PATIENCE = 10
 
 # -- Device --
