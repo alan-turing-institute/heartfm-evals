@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import argparse
 import json
+from datetime import datetime
 from pathlib import Path
 
 import torch
@@ -140,7 +141,8 @@ def main() -> None:
 
     base_name = f"{model_name}_{args.decoder}"
     args.output_dir.mkdir(parents=True, exist_ok=True)
-    json_path = args.output_dir / f"{base_name}.json"
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    json_path = args.output_dir / f"{base_name}_{timestamp}.json"
     if json_path.exists():
         print(f"Skipping: {json_path} already exists.")
         return

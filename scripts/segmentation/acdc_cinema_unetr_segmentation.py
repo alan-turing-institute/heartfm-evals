@@ -67,7 +67,7 @@ BATCH_SIZE = 4  # volumes use ~16x more memory than 2D slices
 LR = 1e-3
 WEIGHT_DECAY = 1e-4
 N_EPOCHS = 1
-PATIENCE = 10
+PATIENCE = 20
 SEED = 0
 
 # -- Device --
@@ -209,6 +209,7 @@ probe = CineMAUNetRDecoder(
     num_classes=NUM_CLASSES,
     n_layers_wo_skip=N_LAYERS_WO_SKIP,
     dropout=0.1,
+    norm="instance",
 ).to(DEVICE)
 
 class_counts = torch.zeros(NUM_CLASSES, dtype=torch.long)
