@@ -303,7 +303,10 @@ def main() -> None:
         val_cached = CachedFeatureDataset(val_manifest)
         test_cached = CachedFeatureDataset(test_manifest)
 
-    bs = args.batch_size if not is_volume else max(1, args.batch_size // 4)
+    bs = args.batch_size
+    if is_volume and bs > 1:
+        print("Warning: 3D volume segmentation is memory-intensive. "
+              "If you encounter OOM errors, try reducing --batch-size.")
     g = torch.Generator().manual_seed(args.seed)
     train_loader = DataLoader(train_cached, batch_size=bs, shuffle=True, num_workers=0, generator=g)
     val_loader = DataLoader(val_cached, batch_size=bs, shuffle=False, num_workers=0)
