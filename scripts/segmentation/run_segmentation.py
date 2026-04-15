@@ -38,6 +38,7 @@ from heartfm_evals.data import load_segmentation_datasets
 from heartfm_evals.decoders import get_decoder
 from heartfm_evals.device import detect_device
 from heartfm_evals.losses import CombinedLoss, MaskedVolumeLoss, WeightedCombinedLoss
+from heartfm_evals.reproducibility import set_seed
 from heartfm_evals.training import evaluate, evaluate_vol, train_segmentation
 
 
@@ -132,6 +133,7 @@ def compute_class_weights(
 
 def main() -> None:
     args = parse_args()
+    set_seed(args.seed)
     device = detect_device(args.device)
     model_name = derive_model_name(args)
     cache_dir = derive_cache_dir(args, model_name)
@@ -300,7 +302,8 @@ def main() -> None:
         test_cached = CachedFeatureDataset(test_manifest)
 
     bs = args.batch_size if not is_volume else max(1, args.batch_size // 4)
-    train_loader = DataLoader(train_cached, batch_size=bs, shuffle=True, num_workers=0)
+    g = torch.Generator().manual_seed(args.seed)
+    train_loader = DataLoader(train_cached, batch_size=bs, shuffle=True, num_workers=0, generator=g)
     val_loader = DataLoader(val_cached, batch_size=bs, shuffle=False, num_workers=0)
     test_loader = DataLoader(test_cached, batch_size=bs, shuffle=False, num_workers=0)
 

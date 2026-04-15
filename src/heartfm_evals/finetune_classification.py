@@ -24,6 +24,7 @@ from sklearn.model_selection import StratifiedKFold
 from sklearn.preprocessing import StandardScaler
 
 from heartfm_evals.classification_probe import NUM_PATHOLOGIES
+from heartfm_evals.reproducibility import set_seed
 
 logger = logging.getLogger(__name__)
 
@@ -209,6 +210,7 @@ def finetune_sweep_and_train(
     num_classes: int = NUM_PATHOLOGIES,
     val_features: torch.Tensor | None = None,
     val_labels: torch.Tensor | None = None,
+    seed: int = 0,
 ) -> tuple[float, ClassificationHead, list[dict], StandardScaler]:
     """Sweep LR via stratified k-fold CV (or val split), then retrain on all training data.
 
@@ -230,6 +232,7 @@ def finetune_sweep_and_train(
         num_classes: Number of output classes for the classification head.
         val_features: Optional validation features, shape ``(M, feature_dim)``.
         val_labels: Optional validation labels, shape ``(M,)``, long tensor.
+        seed: Random seed for reproducibility.
 
     Returns:
         best_lr: Optimal learning rate from CV.
@@ -237,6 +240,8 @@ def finetune_sweep_and_train(
         sweep_results: List of dicts with keys lr, mean_cv_acc, std_cv_acc.
         scaler: Fitted StandardScaler used during training (must be applied at eval).
     """
+    set_seed(seed)
+
     labels_np = train_labels.numpy()
     use_val_split = val_features is not None and val_labels is not None
 

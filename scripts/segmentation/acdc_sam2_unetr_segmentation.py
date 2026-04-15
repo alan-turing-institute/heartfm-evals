@@ -43,6 +43,7 @@ from heartfm_evals.dense_unetr_probe import (
     evaluate_vol,
     train_one_epoch_vol,
 )
+from heartfm_evals.reproducibility import set_seed
 
 _SAM2_VARIANTS = [
     "facebook/sam2.1-hiera-tiny",
@@ -120,6 +121,7 @@ LR = 1e-3
 WEIGHT_DECAY = 1e-4
 N_EPOCHS = 20
 PATIENCE = 10
+SEED = 0
 
 # -- Device --
 if torch.backends.mps.is_available():
@@ -130,6 +132,7 @@ else:
     DEVICE = torch.device("cpu")
 
 HF_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+set_seed(SEED)
 
 print(f"Using device: {DEVICE}")
 print(f"Backbone: {SAM2_MODEL_ID} (embed_dim={EMBED_DIM})")
@@ -389,7 +392,8 @@ train_ds = CachedVolumeDataset(train_manifest, layer_indices=LAYER_INDICES)
 val_ds = CachedVolumeDataset(val_manifest, layer_indices=LAYER_INDICES)
 test_ds = CachedVolumeDataset(test_manifest, layer_indices=LAYER_INDICES)
 
-train_loader = DataLoader(train_ds, batch_size=BATCH_SIZE, shuffle=True, num_workers=0)
+g = torch.Generator().manual_seed(SEED)
+train_loader = DataLoader(train_ds, batch_size=BATCH_SIZE, shuffle=True, num_workers=0, generator=g)
 val_loader = DataLoader(val_ds, batch_size=BATCH_SIZE, shuffle=False, num_workers=0)
 test_loader = DataLoader(test_ds, batch_size=BATCH_SIZE, shuffle=False, num_workers=0)
 

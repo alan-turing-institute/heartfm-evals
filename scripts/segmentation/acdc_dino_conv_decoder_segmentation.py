@@ -33,6 +33,7 @@ from heartfm_evals.dense_linear_probe import (
     overlay_labels,
     train_one_epoch,
 )
+from heartfm_evals.reproducibility import set_seed
 
 parser = argparse.ArgumentParser(
     description="Dense decoder segmentation probe with DINOv3 on ACDC"
@@ -69,6 +70,7 @@ LR = 1e-3
 WEIGHT_DECAY = 1e-4
 N_EPOCHS = 1
 PATIENCE = 10
+SEED = 0
 
 # -- Device --
 if torch.backends.mps.is_available():
@@ -79,6 +81,7 @@ else:
     DEVICE = torch.device("cpu")
 
 print(f"Using device: {DEVICE}")
+set_seed(SEED)
 print(f"Backbone: {MODEL_NAME} (embed_dim={EMBED_DIM}, layers={N_LAYERS})")
 print(
     f"Selected layers: {LAYER_INDICES} -> concat dim = {EMBED_DIM * len(LAYER_INDICES)}"
@@ -220,7 +223,8 @@ train_ds = CachedFeatureDataset(train_manifest)
 val_ds = CachedFeatureDataset(val_manifest)
 test_ds = CachedFeatureDataset(test_manifest)
 
-train_loader = DataLoader(train_ds, batch_size=BATCH_SIZE, shuffle=True, num_workers=0)
+g = torch.Generator().manual_seed(SEED)
+train_loader = DataLoader(train_ds, batch_size=BATCH_SIZE, shuffle=True, num_workers=0, generator=g)
 val_loader = DataLoader(val_ds, batch_size=BATCH_SIZE, shuffle=False, num_workers=0)
 test_loader = DataLoader(test_ds, batch_size=BATCH_SIZE, shuffle=False, num_workers=0)
 

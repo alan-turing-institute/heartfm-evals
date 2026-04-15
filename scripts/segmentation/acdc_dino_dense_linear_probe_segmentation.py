@@ -36,6 +36,7 @@ from heartfm_evals.dense_linear_probe import (
     overlay_labels,
     train_one_epoch,
 )
+from heartfm_evals.reproducibility import set_seed
 
 parser = argparse.ArgumentParser(
     description="Dense linear probe segmentation with DINOv3 on ACDC"
@@ -79,6 +80,7 @@ WEIGHT_DECAY = 1e-3
 DROPOUT = 0.1
 N_EPOCHS = 20
 PATIENCE = 10
+SEED = 0
 
 # -- Device --
 if torch.backends.mps.is_available():
@@ -89,6 +91,7 @@ else:
     DEVICE = torch.device("cpu")
 
 print(f"Using device: {DEVICE}")
+set_seed(SEED)
 print(f"Backbone: {MODEL_NAME} (embed_dim={EMBED_DIM}, layers={N_LAYERS})")
 print(f"Cached layers: {LAYER_INDICES} -> cache dim = {EMBED_DIM * len(LAYER_INDICES)}")
 print(f"Probe layers:  {USE_LAYERS} -> probe input dim = {EMBED_DIM * len(USE_LAYERS)}")
@@ -213,7 +216,8 @@ train_ds = CachedFeatureDataset(train_manifest)
 val_ds = CachedFeatureDataset(val_manifest)
 test_ds = CachedFeatureDataset(test_manifest)
 
-train_loader = DataLoader(train_ds, batch_size=BATCH_SIZE, shuffle=True, num_workers=0)
+g = torch.Generator().manual_seed(SEED)
+train_loader = DataLoader(train_ds, batch_size=BATCH_SIZE, shuffle=True, num_workers=0, generator=g)
 val_loader = DataLoader(val_ds, batch_size=BATCH_SIZE, shuffle=False, num_workers=0)
 test_loader = DataLoader(test_ds, batch_size=BATCH_SIZE, shuffle=False, num_workers=0)
 

@@ -32,6 +32,7 @@ from heartfm_evals.dense_linear_probe import (
     overlay_labels,
     train_one_epoch,
 )
+from heartfm_evals.reproducibility import set_seed
 
 # -- Paths --
 # ACDC_DATA_DIR = Path("/home/rwood/heartfm/data-evals/acdc/")
@@ -53,6 +54,7 @@ LR = 1e-3
 WEIGHT_DECAY = 1e-4
 N_EPOCHS = 1
 PATIENCE = 10
+SEED = 0
 
 # -- Device --
 if torch.backends.mps.is_available():
@@ -63,6 +65,7 @@ else:
     DEVICE = torch.device("cpu")
 
 HF_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+set_seed(SEED)
 print(f"Using device: {DEVICE}")
 print(f"CineMA source: mathpluscode/CineMA (auto_download={AUTO_DOWNLOAD})")
 
@@ -267,7 +270,8 @@ train_ds = CachedFeatureDataset(train_manifest)
 val_ds = CachedFeatureDataset(val_manifest)
 test_ds = CachedFeatureDataset(test_manifest)
 
-train_loader = DataLoader(train_ds, batch_size=BATCH_SIZE, shuffle=True, num_workers=0)
+g = torch.Generator().manual_seed(SEED)
+train_loader = DataLoader(train_ds, batch_size=BATCH_SIZE, shuffle=True, num_workers=0, generator=g)
 val_loader = DataLoader(val_ds, batch_size=BATCH_SIZE, shuffle=False, num_workers=0)
 test_loader = DataLoader(test_ds, batch_size=BATCH_SIZE, shuffle=False, num_workers=0)
 

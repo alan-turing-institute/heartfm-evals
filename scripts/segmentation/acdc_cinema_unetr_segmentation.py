@@ -35,6 +35,7 @@ from heartfm_evals.dense_unetr_probe import (
     evaluate_vol,
     train_one_epoch_vol,
 )
+from heartfm_evals.reproducibility import set_seed
 
 # -- Paths --
 # ACDC_DATA_DIR = Path("/home/rwood/heartfm/data-evals/acdc/")
@@ -66,6 +67,7 @@ LR = 1e-3
 WEIGHT_DECAY = 1e-4
 N_EPOCHS = 1
 PATIENCE = 10
+SEED = 0
 
 # -- Device --
 if torch.backends.mps.is_available():
@@ -76,6 +78,7 @@ else:
     DEVICE = torch.device("cpu")
 
 HF_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+set_seed(SEED)
 print(f"Using device: {DEVICE}")
 print(
     f"Backbone: CineMA pretrained (embed_dim={ENC_EMBED_DIM}, conv_chans={ENC_CONV_CHANS})"
@@ -191,7 +194,8 @@ train_ds = CachedCinemaVolumeDataset(train_manifest, n_conv_skips=len(ENC_CONV_C
 val_ds = CachedCinemaVolumeDataset(val_manifest, n_conv_skips=len(ENC_CONV_CHANS))
 test_ds = CachedCinemaVolumeDataset(test_manifest, n_conv_skips=len(ENC_CONV_CHANS))
 
-train_loader = DataLoader(train_ds, batch_size=BATCH_SIZE, shuffle=True, num_workers=0)
+g = torch.Generator().manual_seed(SEED)
+train_loader = DataLoader(train_ds, batch_size=BATCH_SIZE, shuffle=True, num_workers=0, generator=g)
 val_loader = DataLoader(val_ds, batch_size=BATCH_SIZE, shuffle=False, num_workers=0)
 test_loader = DataLoader(test_ds, batch_size=BATCH_SIZE, shuffle=False, num_workers=0)
 

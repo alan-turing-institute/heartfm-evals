@@ -19,6 +19,7 @@ __all__ = (
     "features",
     "losses",
     "metrics",
+    "reproducibility",
     "training",
     "visualization",
 )
