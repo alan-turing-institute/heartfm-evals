@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 import json
+from datetime import datetime
 from pathlib import Path
 
 import numpy as np
@@ -201,13 +202,15 @@ def main():
     args = parse_args()
     set_seed(args.seed)
     model_name = derive_model_name(args)
+
     tag = eval_mode_tag(args.eval_mode, True)
     base_name = f"{model_name}_{tag}_{args.pooling}"
     if args.max_patients:
         base_name += "_smoke"
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
-    json_path = args.output_dir / f"{base_name}.json"
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    json_path = args.output_dir / f"{base_name}_{timestamp}.json"
     if json_path.exists():
         print(f"Skipping: {json_path} already exists.")
         return
