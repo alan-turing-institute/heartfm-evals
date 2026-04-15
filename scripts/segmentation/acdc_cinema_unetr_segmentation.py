@@ -209,7 +209,7 @@ probe = CineMAUNetRDecoder(
     num_classes=NUM_CLASSES,
     n_layers_wo_skip=N_LAYERS_WO_SKIP,
     dropout=0.1,
-    norm="instance",
+    # norm="instance",
 ).to(DEVICE)
 
 class_counts = torch.zeros(NUM_CLASSES, dtype=torch.long)
