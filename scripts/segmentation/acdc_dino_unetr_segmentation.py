@@ -7,6 +7,7 @@ stacked along z to form pseudo-3D volumes -> 3D UNetR decoder -> class logits
 """
 
 import argparse
+from datetime import datetime
 from pathlib import Path
 
 import matplotlib.patches as mpatches
@@ -313,7 +314,8 @@ ax2.grid(True, alpha=0.3)
 ax2.legend()
 
 plt.tight_layout()
-plt.savefig(f"{MODEL_NAME}_unetr3d_training_curves.png", dpi=150)
+timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+plt.savefig(f"{MODEL_NAME}_unetr3d_training_curves_{timestamp}.png", dpi=150)
 plt.close()
 
 
@@ -372,12 +374,12 @@ legend_patches = [
 ]
 axes[-1, 2].legend(handles=legend_patches, loc="lower right", fontsize=8)
 plt.tight_layout()
-plt.savefig(f"{MODEL_NAME}_unetr3d_test_predictions.png", dpi=150)
+plt.savefig(f"{MODEL_NAME}_unetr3d_test_predictions_{timestamp}.png", dpi=150)
 plt.close()
 
 
 # -- Save Model --
-save_path = Path(f"dense_unetr3d_probe_{MODEL_NAME}.pt")
+save_path = Path(f"dense_unetr3d_probe_{MODEL_NAME}_{timestamp}.pt")
 torch.save(
     {
         "model_state_dict": probe.state_dict(),

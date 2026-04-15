@@ -5,6 +5,7 @@ Architecture: Frozen CineMA (SAX feature extraction) -> cached 2D slice features
 upsample -> small conv decoder -> class logits (BG, RV, MYO, LV).
 """
 
+from datetime import datetime
 from pathlib import Path
 
 import matplotlib.patches as mpatches
@@ -364,7 +365,8 @@ ax2.grid(True, alpha=0.3)
 ax2.legend()
 
 plt.tight_layout()
-plt.savefig("cinema_training_curves.png", dpi=150)
+timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+plt.savefig(f"cinema_training_curves_{timestamp}.png", dpi=150)
 plt.close()
 
 
@@ -419,12 +421,12 @@ legend_patches = [
 ]
 axes[-1, 2].legend(handles=legend_patches, loc="lower right", fontsize=8)
 plt.tight_layout()
-plt.savefig("cinema_test_predictions.png", dpi=150)
+plt.savefig(f"cinema_test_predictions_{timestamp}.png", dpi=150)
 plt.close()
 
 
 # -- Save Model --
-save_path = Path("dense_probe_cinema_pretrained.pt")
+save_path = Path(f"dense_probe_cinema_pretrained_{timestamp}.pt")
 torch.save(
     {
         "model_state_dict": probe.state_dict(),

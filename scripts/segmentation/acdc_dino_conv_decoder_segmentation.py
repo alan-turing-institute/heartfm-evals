@@ -6,6 +6,7 @@ bilinear upsample -> small conv decoder -> class logits (BG, RV, MYO, LV).
 """
 
 import argparse
+from datetime import datetime
 from pathlib import Path
 
 import matplotlib.patches as mpatches
@@ -318,7 +319,8 @@ ax2.grid(True, alpha=0.3)
 ax2.legend()
 
 plt.tight_layout()
-plt.savefig(f"dino_decoder_{MODEL_NAME}_training_curves.png", dpi=150)
+timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+plt.savefig(f"dino_decoder_{MODEL_NAME}_training_curves_{timestamp}.png", dpi=150)
 plt.close()
 
 
@@ -373,12 +375,12 @@ legend_patches = [
 ]
 axes[-1, 2].legend(handles=legend_patches, loc="lower right", fontsize=8)
 plt.tight_layout()
-plt.savefig(f"dino_decoder_{MODEL_NAME}_test_predictions.png", dpi=150)
+plt.savefig(f"dino_decoder_{MODEL_NAME}_test_predictions_{timestamp}.png", dpi=150)
 plt.close()
 
 
 # -- Save Model --
-save_path = Path(f"dense_decoder_probe_{MODEL_NAME}.pt")
+save_path = Path(f"dense_decoder_probe_{MODEL_NAME}_{timestamp}.pt")
 torch.save(
     {
         "model_state_dict": probe.state_dict(),

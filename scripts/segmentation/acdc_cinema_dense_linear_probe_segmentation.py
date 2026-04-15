@@ -6,6 +6,7 @@ Dropout2d -> BatchNorm2d -> per-pixel 1x1 Conv2d -> bilinear upsample
 (4 classes: BG, RV, MYO, LV).
 """
 
+from datetime import datetime
 from pathlib import Path
 
 import matplotlib.patches as mpatches
@@ -378,7 +379,8 @@ ax2.legend()
 ax2.grid(True, alpha=0.3)
 
 plt.tight_layout()
-plt.savefig("cinema_linear_probe_training_curves.png", dpi=150)
+timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+plt.savefig(f"cinema_linear_probe_training_curves_{timestamp}.png", dpi=150)
 plt.close()
 
 
@@ -470,12 +472,12 @@ legend_patches = [
 ]
 axes[-1, 2].legend(handles=legend_patches, loc="lower right", fontsize=8)
 plt.tight_layout()
-plt.savefig("cinema_linear_probe_test_predictions.png", dpi=150)
+plt.savefig(f"cinema_linear_probe_test_predictions_{timestamp}.png", dpi=150)
 plt.close()
 
 
 # -- Save Model --
-save_path = Path("dense_linear_probe_cinema_pretrained.pt")
+save_path = Path(f"dense_linear_probe_cinema_pretrained_{timestamp}.pt")
 torch.save(
     {
         "model_state_dict": probe.state_dict(),
