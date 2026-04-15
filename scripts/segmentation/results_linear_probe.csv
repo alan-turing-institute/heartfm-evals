@@ -1,8 +1,0 @@
-arch,model,best_epoch,val_dice,bg_dice,rv_dice,myo_dice,lv_dice,macro_dice,mean_macro_dice,std_macro_dice
-DINOv3,dinov3_vits16,17,0.7553,0.9816,0.7248,0.6565,0.8401,0.7405,0.5565,0.0635
-DINOv3,dinov3_vitb16,15,0.7862,0.9834,0.753,0.6928,0.8608,0.7689,0.5854,0.0661
-DINOv3,dinov3_vitl16,17,0.7953,0.9842,0.7687,0.6903,0.8651,0.7747,0.6,0.065
-SAM 2.1,facebook/sam2.1-hiera-tiny,19,0.8418,0.9837,0.7808,0.7692,0.8846,0.8115,0.6669,0.0702
-SAM 2.1,facebook/sam2.1-hiera-small,20,0.8589,0.9859,0.8053,0.8071,0.908,0.8401,0.6866,0.0646
-SAM 2.1,facebook/sam2.1-hiera-base-plus,17,0.8367,0.9844,0.7892,0.7711,0.8865,0.8156,0.6623,0.0701
-SAM 2.1,facebook/sam2.1-hiera-large,20,0.8598,0.9864,0.8217,0.8083,0.9082,0.8461,0.7031,0.0666
