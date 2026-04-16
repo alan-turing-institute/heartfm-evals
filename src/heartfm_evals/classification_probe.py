@@ -433,7 +433,7 @@ def build_patient_features(
         pathology_classes: {class_name: int_label} mapping. Defaults to ACDC classes.
 
     Returns:
-        features: (N_patients, 2 * embed_dim) float64 tensor.
+        features: (N_patients, 2 * embed_dim) float32 tensor.
         labels: (N_patients,) integer tensor.
         pids: List of patient IDs in the same order.
     """
@@ -464,7 +464,7 @@ def build_patient_features(
         labels_list.append(pathology_classes[pathology])
         pids.append(pid)
 
-    features = torch.stack(features_list).to(dtype=torch.float64)
+    features = torch.stack(features_list).to(dtype=torch.float32)
     labels = torch.tensor(labels_list, dtype=torch.long)
     return features, labels, pids
 

@@ -6,5 +6,20 @@ from __future__ import annotations
 
 from importlib.metadata import version
 
-__all__ = ("__version__",)
 __version__ = version(__name__)
+
+__all__ = (
+    "__version__",
+    "backbones",
+    "caching",
+    "constants",
+    "data",
+    "decoders",
+    "device",
+    "features",
+    "losses",
+    "metrics",
+    "reproducibility",
+    "training",
+    "visualization",
+)

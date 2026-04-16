@@ -25,11 +25,11 @@ from heartfm_evals.classification_probe import (
 )
 from heartfm_evals.finetune_classification import (
     ClassificationHead,
-    _group_samples_by_patient,
+    ClassificationHeadPredictor,
 )
 
-
 # ── Helpers ──────────────────────────────────────────────────────────────────
+
 
 def _make_cls_features(pids, embed_dim=8):
     """Create fake cls_features dict: {pid: {ed_features: (n, dim), es_features: (n, dim)}}."""
@@ -42,18 +42,10 @@ def _make_cls_features(pids, embed_dim=8):
     return feats
 
 
-def _make_fake_cinema_dataset(patients: list[tuple[str, bool]]):
-    """Create a mock CineMA dataset. patients is [(pid, is_ed), ...]."""
-    dataset = MagicMock()
-    dataset.__len__ = MagicMock(return_value=len(patients))
-    samples = [{"pid": pid, "is_ed": is_ed} for pid, is_ed in patients]
-    dataset.__getitem__ = MagicMock(side_effect=lambda i: samples[i])
-    return dataset
-
-
 # ═══════════════════════════════════════════════════════════════════════════════
 # Group A: Pathology class registry
 # ═══════════════════════════════════════════════════════════════════════════════
+
 
 class TestPathologyClassRegistry:
     def test_get_pathology_classes_acdc(self):
@@ -79,7 +71,7 @@ class TestPathologyClassRegistry:
 
     def test_backward_compat_global(self):
         """The old PATHOLOGY_CLASSES global should still equal ACDC classes."""
-        assert PATHOLOGY_CLASSES == get_pathology_classes("acdc")
+        assert get_pathology_classes("acdc") == PATHOLOGY_CLASSES
 
     def test_validate_split_labels_train_exact_match_no_warning(self):
         mnm2_classes = get_pathology_classes("mnm2")
@@ -160,6 +152,7 @@ class TestPathologyClassRegistry:
 # Group B: build_patient_features with custom pathology_classes
 # ═══════════════════════════════════════════════════════════════════════════════
 
+
 class TestBuildPatientFeatures:
     def test_uses_custom_classes(self):
         mnm2_classes = get_pathology_classes("mnm2")
@@ -168,7 +161,9 @@ class TestBuildPatientFeatures:
         pathology_map = {"p1": "NOR", "p2": "ARR", "p3": "LV"}
 
         features, labels, out_pids = build_patient_features(
-            cls_features, pathology_map, pathology_classes=mnm2_classes,
+            cls_features,
+            pathology_map,
+            pathology_classes=mnm2_classes,
         )
 
         assert features.shape == (3, 16)  # 2 * embed_dim
@@ -183,7 +178,9 @@ class TestBuildPatientFeatures:
         pathology_map = {"p1": "MINF", "p2": "NOR"}  # MINF not in MnM2
 
         features, labels, out_pids = build_patient_features(
-            cls_features, pathology_map, pathology_classes=mnm2_classes,
+            cls_features,
+            pathology_map,
+            pathology_classes=mnm2_classes,
         )
         assert out_pids == ["p2"]  # p1 (MINF) was skipped
         assert labels.tolist() == [0]  # NOR=0
@@ -202,6 +199,7 @@ class TestBuildPatientFeatures:
 # Group C: evaluate_classification with different num classes
 # ═══════════════════════════════════════════════════════════════════════════════
 
+
 class TestEvaluateClassification:
     def _make_mock_model(self, predictions, probabilities):
         model = MagicMock()
@@ -219,12 +217,16 @@ class TestEvaluateClassification:
 
         model = self._make_mock_model(y_pred, y_prob)
         metrics = evaluate_classification(
-            model, torch.randn(n_samples, 16), y_true,
+            model,
+            torch.randn(n_samples, 16),
+            y_true,
             pathology_classes=mnm2_classes,
         )
 
         assert metrics["confusion_matrix"].shape == (n_classes, n_classes)
-        assert set(mnm2_classes.keys()).issubset(metrics["per_class_sensitivity"].keys())
+        assert set(mnm2_classes.keys()).issubset(
+            metrics["per_class_sensitivity"].keys()
+        )
         assert metrics["accuracy"] == 1.0
 
     def test_5_classes_backward_compat(self):
@@ -244,6 +246,7 @@ class TestEvaluateClassification:
 # ═══════════════════════════════════════════════════════════════════════════════
 # Group D: binarize_labels and evaluate_binary_detection
 # ═══════════════════════════════════════════════════════════════════════════════
+
 
 class TestBinaryDetection:
     def test_binarize_labels_nor_always_zero(self):
@@ -287,6 +290,7 @@ class TestBinaryDetection:
 # Group E: sweep_C_and_train with val split
 # ═══════════════════════════════════════════════════════════════════════════════
 
+
 class TestSweepCWithValSplit:
     def _make_synthetic_data(self, n_per_class=10, n_classes=5, embed_dim=8):
         features = torch.randn(n_per_class * n_classes, embed_dim, dtype=torch.float64)
@@ -298,8 +302,10 @@ class TestSweepCWithValSplit:
         val_features, val_labels = self._make_synthetic_data(n_per_class=3)
 
         best_C, pipeline, sweep_results = sweep_C_and_train(
-            train_features, train_labels,
-            val_features=val_features, val_labels=val_labels,
+            train_features,
+            train_labels,
+            val_features=val_features,
+            val_labels=val_labels,
         )
 
         assert best_C > 0
@@ -334,6 +340,7 @@ class TestSweepCWithValSplit:
 # Group F: Finetune module
 # ═══════════════════════════════════════════════════════════════════════════════
 
+
 class TestFinetuneModule:
     def test_classification_head_custom_num_classes(self):
         head = ClassificationHead(in_dim=768, num_classes=6)
@@ -348,34 +355,42 @@ class TestFinetuneModule:
         out = head(x)
         assert out.shape == (2, 5)
 
-    def test_group_samples_by_patient_custom_classes(self):
-        mnm2_classes = get_pathology_classes("mnm2")
-        patients = [
-            ("p1", True), ("p1", False),  # ED + ES for p1
-            ("p2", True), ("p2", False),  # ED + ES for p2
-        ]
-        dataset = _make_fake_cinema_dataset(patients)
-        pathology_map = {"p1": "ARR", "p2": "LV"}
+    def test_classification_head_predictor_predict(self):
+        """ClassificationHeadPredictor.predict returns argmax predictions."""
+        from sklearn.preprocessing import StandardScaler
 
-        result = _group_samples_by_patient(dataset, pathology_map, pathology_classes=mnm2_classes)
+        head = ClassificationHead(in_dim=16, num_classes=5)
+        scaler = StandardScaler()
+        X_train = np.random.randn(10, 16)
+        scaler.fit(X_train)
 
-        assert len(result) == 2
-        labels = {r["pid"]: r["label"] for r in result}
-        assert labels["p1"] == mnm2_classes["ARR"]  # 2
-        assert labels["p2"] == mnm2_classes["LV"]  # 5
+        predictor = ClassificationHeadPredictor(head, scaler, torch.device("cpu"))
+        X_test = np.random.randn(4, 16).astype(np.float64)
+        preds = predictor.predict(X_test)
+        assert preds.shape == (4,)
+        assert all(0 <= p < 5 for p in preds)
 
-    def test_group_samples_default_uses_acdc(self):
-        patients = [("p1", True), ("p1", False)]
-        dataset = _make_fake_cinema_dataset(patients)
-        pathology_map = {"p1": "MINF"}
+    def test_classification_head_predictor_predict_proba(self):
+        """ClassificationHeadPredictor.predict_proba returns softmax probabilities."""
+        from sklearn.preprocessing import StandardScaler
 
-        result = _group_samples_by_patient(dataset, pathology_map)
-        assert result[0]["label"] == 3  # MINF=3 in ACDC
+        head = ClassificationHead(in_dim=16, num_classes=5)
+        scaler = StandardScaler()
+        X_train = np.random.randn(10, 16)
+        scaler.fit(X_train)
+
+        predictor = ClassificationHeadPredictor(head, scaler, torch.device("cpu"))
+        X_test = np.random.randn(4, 16).astype(np.float64)
+        probs = predictor.predict_proba(X_test)
+        assert probs.shape == (4, 5)
+        # Each row should sum to ~1.0 (softmax)
+        np.testing.assert_allclose(probs.sum(axis=1), 1.0, atol=1e-6)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Group G: CLI / output path helpers
 # ═══════════════════════════════════════════════════════════════════════════════
+
 
 class TestCLIHelpers:
     def test_output_dir_includes_dataset_name(self):
@@ -395,6 +410,7 @@ class TestCLIHelpers:
 
     def test_eval_mode_tag(self):
         import warnings
+
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", DeprecationWarning)
             from scripts.classification.run_classification import eval_mode_tag
