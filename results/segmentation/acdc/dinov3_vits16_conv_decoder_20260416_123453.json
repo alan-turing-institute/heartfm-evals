@@ -19,32 +19,34 @@
     ],
     "lr": 0.001,
     "weight_decay": 0.0001,
-    "batch_size": 16,
+    "batch_size": 4,
     "n_epochs": 1,
     "patience": 20,
     "seed": 0,
     "trainable_params": 1917956
   },
   "per_class_dice": {
-    "BG": 0.9804353206758727,
-    "RV": 0.7674402231949805,
-    "MYO": 0.7313265095514568,
-    "LV": 0.8922052264849551
+    "BG": 0.9800211353235143,
+    "RV": 0.7727061978258081,
+    "MYO": 0.7327183128873418,
+    "LV": 0.8853745666936215
   },
-  "macro_dice": 0.7969906530771308,
+  "macro_dice": 0.796933025802257,
   "training_history": {
     "train_loss": [
-      0.7606018433968226
+      0.6360731145056585
     ],
     "val_macro_dice": [
-      0.8118364788458207
+      0.8114868367106306
     ],
     "lr": [
       0.0
     ]
   },
-  "best_val_dice": 0.8118364788458207,
+  "best_val_dice": 0.8114868367106306,
   "best_epoch": 1,
-  "per_sample_metrics_file": "dinov3_vits16_conv_decoder_20260416_104116_per_sample.csv",
-  "n_test_samples": 916
+  "per_slice_metrics_file": "dinov3_vits16_conv_decoder_20260416_123453_per_slice.csv",
+  "n_test_slices": 916,
+  "per_stack_metrics_file": "dinov3_vits16_conv_decoder_20260416_123453_per_stack.csv",
+  "n_test_stacks": 100
 }
