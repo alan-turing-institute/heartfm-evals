@@ -20,6 +20,7 @@ from heartfm_evals.training import (
     evaluate,
     evaluate_per_sample,
     evaluate_vol,
+    evaluate_vol_per_slice,
     evaluate_vol_per_sample,
 )
 
@@ -178,6 +179,52 @@ def test_evaluate_vol_per_sample_uses_whole_stack_and_ignores_padding() -> None:
     assert all(np.isclose(score, 1.0) for score in aggregate["per_class_dice"].values())
 
 
+def test_evaluate_vol_per_slice_returns_one_row_per_valid_slice() -> None:
+    label = torch.tensor(
+        [
+            [
+                [[0, 1, 0], [1, 2, 0]],
+                [[0, 3, 0], [3, 0, 0]],
+            ]
+        ],
+        dtype=torch.long,
+    )
+    pred_labels = torch.tensor(
+        [
+            [[0, 1, 1], [1, 0, 1]],
+            [[0, 3, 1], [3, 0, 1]],
+        ],
+        dtype=torch.long,
+    )
+    sample = {
+        "logits": _class_logits(pred_labels),
+        "label": label,
+        "n_slices": 2,
+        "pid": "003",
+        "is_ed": True,
+    }
+    loader = DataLoader(VolumeDataset([sample]), batch_size=1, shuffle=False)
+    model = DictPassthroughModel()
+
+    rows = evaluate_vol_per_slice(model, loader, device=torch.device("cpu"))
+
+    assert len(rows) == 2
+    assert [row["z_idx"] for row in rows] == [0, 1]
+    assert all(row["pid"] == "003" for row in rows)
+    assert all(row["frame"] == "ed" for row in rows)
+    assert all(row["is_ed"] is True for row in rows)
+    assert np.isclose(rows[0]["dice_BG"], 1.0)
+    assert np.isclose(rows[0]["dice_RV"], 1.0)
+    assert np.isnan(rows[0]["dice_MYO"])
+    assert np.isclose(rows[0]["dice_LV"], 1.0)
+    assert np.isclose(rows[0]["macro_dice"], 1.0)
+    assert np.isclose(rows[1]["dice_BG"], 2 / 3)
+    assert np.isclose(rows[1]["dice_RV"], 1.0)
+    assert np.isclose(rows[1]["dice_MYO"], 0.0)
+    assert np.isclose(rows[1]["dice_LV"], 1.0)
+    assert np.isclose(rows[1]["macro_dice"], 2 / 3)
+
+
 def test_run_segmentation_main_writes_json_and_per_sample_csv(
     tmp_path: Path, monkeypatch
 ) -> None:
@@ -311,3 +358,175 @@ def test_run_segmentation_main_writes_json_and_per_sample_csv(
     assert list(df["pid"]) == ["001", "002"]
     assert list(df["frame"]) == ["ed", "es"]
     assert list(df["z_idx"]) == [0, 1]
+
+
+def test_run_segmentation_main_writes_3d_json_and_parallel_slice_csv(
+    tmp_path: Path, monkeypatch
+) -> None:
+    module = _load_run_segmentation_module()
+
+    args = SimpleNamespace(
+        backbone="cinema",
+        decoder="unetr",
+        dataset="acdc",
+        data_dir=tmp_path / "data",
+        output_dir=tmp_path / "results",
+        cache_dir=tmp_path / "cache",
+        dinov3_model_name="dinov3_vits16",
+        dinov3_repo_dir="models/dinov3/",
+        dinov3_weights_path=None,
+        sam2_model_id="facebook/sam2.1-hiera-base-plus",
+        hf_cache_dir=tmp_path / "hf",
+        use_layers=None,
+        batch_size=1,
+        lr=1e-3,
+        weight_decay=1e-3,
+        n_epochs=1,
+        patience=1,
+        dropout=0.1,
+        seed=0,
+        device="cpu",
+        no_auto_download=True,
+    )
+
+    class DummyCachedVolumeDataset(Dataset):
+        def __init__(self, manifest: list[dict], n_conv_skips: int = 2):
+            self.manifest = manifest
+            self.n_conv_skips = n_conv_skips
+
+        def __len__(self) -> int:
+            return len(self.manifest)
+
+        def __getitem__(self, idx: int) -> dict:
+            return {
+                "image": torch.zeros((1, 2, 2, 2), dtype=torch.float32),
+                "label": torch.zeros((1, 2, 2, 2), dtype=torch.long),
+                "n_slices": 2,
+                "pid": "010",
+                "is_ed": True,
+                "vit_features": torch.zeros((4, 2, 2, 2), dtype=torch.float32),
+                "conv_skip_0": torch.zeros((2, 2, 2, 2), dtype=torch.float32),
+                "conv_skip_1": torch.zeros((2, 2, 2, 2), dtype=torch.float32),
+            }
+
+    monkeypatch.setattr(module, "parse_args", lambda: args)
+    monkeypatch.setattr(module, "set_seed", lambda _seed: None)
+    monkeypatch.setattr(module, "detect_device", lambda _device: torch.device("cpu"))
+    monkeypatch.setattr(
+        module,
+        "load_backbone",
+        lambda *_args, **_kwargs: (
+            torch.nn.Identity(),
+            {"embed_dim": 4, "layer_indices": (3, 6, 9, 11), "enc_conv_chans": (64, 128)},
+        ),
+    )
+    monkeypatch.setattr(
+        module,
+        "load_segmentation_datasets",
+        lambda *_args, **_kwargs: (["train"], ["val"], ["test"], None, None, None),
+    )
+    monkeypatch.setattr(
+        module,
+        "cache_cinema_volume_features",
+        lambda *_args, **_kwargs: [
+            {"path": Path("unused.pt"), "pid": "010", "is_ed": True, "n_slices": 2}
+        ],
+    )
+    monkeypatch.setattr(module, "CachedCinemaVolumeDataset", DummyCachedVolumeDataset)
+    monkeypatch.setattr(
+        module,
+        "get_decoder",
+        lambda **_kwargs: torch.nn.Conv3d(1, 4, kernel_size=1, bias=False),
+    )
+    monkeypatch.setattr(
+        module,
+        "compute_class_weights",
+        lambda *_args, **_kwargs: torch.ones(4, dtype=torch.float32),
+    )
+    monkeypatch.setattr(
+        module,
+        "train_segmentation",
+        lambda **_kwargs: {
+            "history": {"train_loss": [0.1], "val_macro_dice": [0.5], "lr": [1e-3]},
+            "best_val_dice": 0.5,
+            "best_epoch": 1,
+        },
+    )
+    monkeypatch.setattr(
+        module,
+        "evaluate_vol",
+        lambda *_args, **_kwargs: {
+            "per_class_dice": {"BG": 0.9, "RV": 0.8, "MYO": 0.7, "LV": 0.6},
+            "macro_dice": 0.7,
+        },
+    )
+    monkeypatch.setattr(
+        module,
+        "evaluate_vol_per_sample",
+        lambda *_args, **_kwargs: [
+            {
+                "pid": "010",
+                "frame": "ed",
+                "is_ed": True,
+                "n_slices": 2,
+                "dice_BG": 0.9,
+                "dice_RV": 0.8,
+                "dice_MYO": 0.7,
+                "dice_LV": 0.6,
+                "macro_dice": 0.7,
+            }
+        ],
+    )
+    monkeypatch.setattr(
+        module,
+        "evaluate_vol_per_slice",
+        lambda *_args, **_kwargs: [
+            {
+                "pid": "010",
+                "frame": "ed",
+                "is_ed": True,
+                "z_idx": 1,
+                "dice_BG": 0.85,
+                "dice_RV": np.nan,
+                "dice_MYO": 0.65,
+                "dice_LV": 0.75,
+                "macro_dice": 0.7,
+            },
+            {
+                "pid": "010",
+                "frame": "ed",
+                "is_ed": True,
+                "z_idx": 0,
+                "dice_BG": 0.95,
+                "dice_RV": 0.8,
+                "dice_MYO": 0.75,
+                "dice_LV": 0.85,
+                "macro_dice": 0.8,
+            },
+        ],
+    )
+
+    module.main()
+
+    json_files = sorted(args.output_dir.glob("*.json"))
+    per_sample_csv_files = sorted(args.output_dir.glob("*_per_sample.csv"))
+    per_slice_csv_files = sorted(args.output_dir.glob("*_per_slice.csv"))
+    assert len(json_files) == 1
+    assert len(per_sample_csv_files) == 1
+    assert len(per_slice_csv_files) == 1
+
+    results = json.loads(json_files[0].read_text())
+    assert results["per_sample_metrics_file"] == per_sample_csv_files[0].name
+    assert results["n_test_samples"] == 1
+    assert results["per_slice_metrics_file"] == per_slice_csv_files[0].name
+    assert results["n_test_slices"] == 2
+
+    per_sample_df = pd.read_csv(per_sample_csv_files[0], dtype={"pid": str})
+    assert list(per_sample_df["pid"]) == ["010"]
+    assert list(per_sample_df["frame"]) == ["ed"]
+    assert list(per_sample_df["n_slices"]) == [2]
+
+    per_slice_df = pd.read_csv(per_slice_csv_files[0], dtype={"pid": str})
+    assert list(per_slice_df["pid"]) == ["010", "010"]
+    assert list(per_slice_df["frame"]) == ["ed", "ed"]
+    assert list(per_slice_df["z_idx"]) == [0, 1]

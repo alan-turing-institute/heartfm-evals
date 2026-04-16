@@ -5,6 +5,7 @@ Provides:
 - ``train_one_epoch_vol()`` / ``evaluate_vol()``: 3D volume-level training/eval.
 - ``evaluate_per_sample()`` / ``evaluate_vol_per_sample()``: test-only
   per-sample Dice reporting.
+- ``evaluate_vol_per_slice()``: test-only 3D per-slice Dice reporting.
 - ``train_segmentation()``: High-level wrapper with early stopping and LR scheduling.
 """
 
@@ -250,6 +251,49 @@ def evaluate_vol_per_sample(
             }
             row.update(per_sample_dice_metrics(pred_i, label_i))
             rows.append(row)
+
+    return rows
+
+
+@torch.inference_mode()
+def evaluate_vol_per_slice(
+    model: nn.Module,
+    dataloader,
+    device: torch.device,
+    **_kwargs,
+) -> list[dict]:
+    """Evaluate on cached volume features and return one metrics row per valid slice."""
+    model.eval()
+    rows: list[dict] = []
+
+    for batch in dataloader:
+        batch_gpu = _batch_to_device(batch, device)
+
+        labels = batch["label"]  # (B, 1, H, W, Z)
+        n_slices = batch["n_slices"]  # (B,)
+
+        logits = model(batch_gpu)
+        preds = logits.argmax(dim=1).cpu()  # (B, H, W, Z)
+
+        for i in range(preds.shape[0]):
+            ns = int(_batch_item(n_slices, i))
+            is_ed = bool(_batch_item(batch["is_ed"], i))
+            pid = str(_batch_item(batch["pid"], i))
+
+            for z_idx in range(ns):
+                row = {
+                    "pid": pid,
+                    "frame": _frame_name(is_ed),
+                    "is_ed": is_ed,
+                    "z_idx": z_idx,
+                }
+                row.update(
+                    per_sample_dice_metrics(
+                        preds[i, :, :, z_idx].numpy(),
+                        labels[i, 0, :, :, z_idx].numpy(),
+                    )
+                )
+                rows.append(row)
 
     return rows
 

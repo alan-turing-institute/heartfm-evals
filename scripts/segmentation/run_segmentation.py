@@ -45,6 +45,7 @@ from heartfm_evals.training import (
     evaluate,
     evaluate_per_sample,
     evaluate_vol,
+    evaluate_vol_per_slice,
     evaluate_vol_per_sample,
     train_segmentation,
 )
@@ -139,25 +140,27 @@ def compute_class_weights(
     return class_weights.to(device)
 
 
-def per_sample_metric_columns(is_volume: bool) -> list[str]:
-    """Return output columns for the per-sample metrics CSV."""
+def metric_columns(metric_level: str) -> list[str]:
+    """Return output columns for a metrics CSV."""
     base_columns = ["pid", "frame", "is_ed"]
-    if is_volume:
+    if metric_level == "volume":
         base_columns.append("n_slices")
-    else:
+    elif metric_level == "slice":
         base_columns.append("z_idx")
+    else:
+        raise ValueError(f"Unknown metric level: {metric_level}")
     dice_columns = [f"dice_{CLASS_NAMES.get(c, f'C{c}')}" for c in range(NUM_CLASSES)]
     return [*base_columns, *dice_columns, "macro_dice"]
 
 
-def save_per_sample_metrics(
+def save_metrics_csv(
     rows: list[dict],
     output_path: Path,
-    is_volume: bool,
+    metric_level: str,
 ) -> int:
-    """Write per-sample metrics to CSV in a deterministic order."""
-    df = pd.DataFrame(rows, columns=per_sample_metric_columns(is_volume))
-    sort_columns = ["pid", "frame"] if is_volume else ["pid", "frame", "z_idx"]
+    """Write metrics rows to CSV in a deterministic order."""
+    df = pd.DataFrame(rows, columns=metric_columns(metric_level))
+    sort_columns = ["pid", "frame"] if metric_level == "volume" else ["pid", "frame", "z_idx"]
     if not df.empty:
         df = df.sort_values(sort_columns, kind="stable").reset_index(drop=True)
     df.to_csv(output_path, index=False)
@@ -416,11 +419,22 @@ def main() -> None:
     per_sample_eval_fn = evaluate_vol_per_sample if is_volume else evaluate_per_sample
     per_sample_rows = per_sample_eval_fn(decoder, test_loader, device)
     per_sample_path = json_path.with_name(f"{json_path.stem}_per_sample.csv")
-    n_test_samples = save_per_sample_metrics(
+    metric_level = "volume" if is_volume else "slice"
+    n_test_samples = save_metrics_csv(
         per_sample_rows,
         per_sample_path,
-        is_volume=is_volume,
+        metric_level=metric_level,
     )
+    per_slice_path: Path | None = None
+    n_test_slices: int | None = None
+    if is_volume:
+        per_slice_rows = evaluate_vol_per_slice(decoder, test_loader, device)
+        per_slice_path = json_path.with_name(f"{json_path.stem}_per_slice.csv")
+        n_test_slices = save_metrics_csv(
+            per_slice_rows,
+            per_slice_path,
+            metric_level="slice",
+        )
 
     print("\nTest Results:")
     print("Per-class Dice:")
@@ -429,6 +443,9 @@ def main() -> None:
     print(f"Macro Dice (excl. BG): {test_metrics['macro_dice']:.4f}")
     print(f"Per-sample metrics rows: {n_test_samples}")
     print(f"Per-sample metrics saved to: {per_sample_path}")
+    if per_slice_path is not None and n_test_slices is not None:
+        print(f"Per-slice metrics rows: {n_test_slices}")
+        print(f"Per-slice metrics saved to: {per_slice_path}")
 
     # ── Save results ──
     results = {
@@ -456,6 +473,9 @@ def main() -> None:
         "per_sample_metrics_file": per_sample_path.name,
         "n_test_samples": n_test_samples,
     }
+    if per_slice_path is not None and n_test_slices is not None:
+        results["per_slice_metrics_file"] = per_slice_path.name
+        results["n_test_slices"] = n_test_slices
     json_path.write_text(json.dumps(results, indent=2))
     print(f"\nSaved results: {json_path}")
 
