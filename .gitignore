@@ -188,4 +188,3 @@ linear_feature_cache/
 uv.lock
 *.gz
 *.pt
-*.png
