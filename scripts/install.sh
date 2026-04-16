@@ -14,4 +14,3 @@ uv pip install torch==2.11.0 --index-url https://download.pytorch.org/whl/cu128
 uv sync
 
 echo "Done!"
-

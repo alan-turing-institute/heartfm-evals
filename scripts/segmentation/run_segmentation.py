@@ -19,10 +19,11 @@ import json
 from datetime import datetime
 from pathlib import Path
 
+import pandas as pd
 import torch
 from torch.utils.data import DataLoader
 
-from heartfm_evals.backbones import DINOV3_CONFIGS, SAM2_CONFIGS, load_backbone
+from heartfm_evals.backbones import load_backbone
 from heartfm_evals.caching import (
     CachedCinemaVolumeDataset,
     CachedFeatureDataset,
@@ -34,13 +35,19 @@ from heartfm_evals.caching import (
     cache_sam2_2d_features,
     cache_sam_volume_features,
 )
-from heartfm_evals.constants import NUM_CLASSES
+from heartfm_evals.constants import CLASS_NAMES, NUM_CLASSES
 from heartfm_evals.data import load_segmentation_datasets
 from heartfm_evals.decoders import get_decoder
 from heartfm_evals.device import detect_device
 from heartfm_evals.losses import CombinedLoss, MaskedVolumeLoss, WeightedCombinedLoss
 from heartfm_evals.reproducibility import set_seed
-from heartfm_evals.training import evaluate, evaluate_vol, train_segmentation
+from heartfm_evals.training import (
+    evaluate,
+    evaluate_per_sample,
+    evaluate_vol,
+    evaluate_vol_per_sample,
+    train_segmentation,
+)
 
 
 def parse_args() -> argparse.Namespace:
@@ -130,6 +137,31 @@ def compute_class_weights(
     class_weights[0] = class_weights[0] * 0.5  # downweight background
     class_weights = class_weights / class_weights.mean()
     return class_weights.to(device)
+
+
+def per_sample_metric_columns(is_volume: bool) -> list[str]:
+    """Return output columns for the per-sample metrics CSV."""
+    base_columns = ["pid", "frame", "is_ed"]
+    if is_volume:
+        base_columns.append("n_slices")
+    else:
+        base_columns.append("z_idx")
+    dice_columns = [f"dice_{CLASS_NAMES.get(c, f'C{c}')}" for c in range(NUM_CLASSES)]
+    return [*base_columns, *dice_columns, "macro_dice"]
+
+
+def save_per_sample_metrics(
+    rows: list[dict],
+    output_path: Path,
+    is_volume: bool,
+) -> int:
+    """Write per-sample metrics to CSV in a deterministic order."""
+    df = pd.DataFrame(rows, columns=per_sample_metric_columns(is_volume))
+    sort_columns = ["pid", "frame"] if is_volume else ["pid", "frame", "z_idx"]
+    if not df.empty:
+        df = df.sort_values(sort_columns, kind="stable").reset_index(drop=True)
+    df.to_csv(output_path, index=False)
+    return len(df)
 
 
 def main() -> None:
@@ -291,9 +323,15 @@ def main() -> None:
     if is_volume:
         if args.backbone == "cinema":
             n_conv_skips = len(config.get("enc_conv_chans", (64, 128)))
-            train_cached = CachedCinemaVolumeDataset(train_manifest, n_conv_skips=n_conv_skips)
-            val_cached = CachedCinemaVolumeDataset(val_manifest, n_conv_skips=n_conv_skips)
-            test_cached = CachedCinemaVolumeDataset(test_manifest, n_conv_skips=n_conv_skips)
+            train_cached = CachedCinemaVolumeDataset(
+                train_manifest, n_conv_skips=n_conv_skips
+            )
+            val_cached = CachedCinemaVolumeDataset(
+                val_manifest, n_conv_skips=n_conv_skips
+            )
+            test_cached = CachedCinemaVolumeDataset(
+                test_manifest, n_conv_skips=n_conv_skips
+            )
         else:
             train_cached = CachedVolumeDataset(train_manifest, layer_indices)
             val_cached = CachedVolumeDataset(val_manifest, layer_indices)
@@ -305,10 +343,14 @@ def main() -> None:
 
     bs = args.batch_size
     if is_volume and bs > 1:
-        print("Warning: 3D volume segmentation is memory-intensive. "
-              "If you encounter OOM errors, try reducing --batch-size.")
+        print(
+            "Warning: 3D volume segmentation is memory-intensive. "
+            "If you encounter OOM errors, try reducing --batch-size."
+        )
     g = torch.Generator().manual_seed(args.seed)
-    train_loader = DataLoader(train_cached, batch_size=bs, shuffle=True, num_workers=0, generator=g)
+    train_loader = DataLoader(
+        train_cached, batch_size=bs, shuffle=True, num_workers=0, generator=g
+    )
     val_loader = DataLoader(val_cached, batch_size=bs, shuffle=False, num_workers=0)
     test_loader = DataLoader(test_cached, batch_size=bs, shuffle=False, num_workers=0)
 
@@ -371,12 +413,22 @@ def main() -> None:
     # ── Evaluate on test set ──
     eval_fn = evaluate_vol if is_volume else evaluate
     test_metrics = eval_fn(decoder, test_loader, device)
+    per_sample_eval_fn = evaluate_vol_per_sample if is_volume else evaluate_per_sample
+    per_sample_rows = per_sample_eval_fn(decoder, test_loader, device)
+    per_sample_path = json_path.with_name(f"{json_path.stem}_per_sample.csv")
+    n_test_samples = save_per_sample_metrics(
+        per_sample_rows,
+        per_sample_path,
+        is_volume=is_volume,
+    )
 
     print("\nTest Results:")
     print("Per-class Dice:")
     for name, d in test_metrics["per_class_dice"].items():
         print(f"  {name:>3s}: {d:.4f}")
     print(f"Macro Dice (excl. BG): {test_metrics['macro_dice']:.4f}")
+    print(f"Per-sample metrics rows: {n_test_samples}")
+    print(f"Per-sample metrics saved to: {per_sample_path}")
 
     # ── Save results ──
     results = {
@@ -401,6 +453,8 @@ def main() -> None:
         "training_history": train_result["history"],
         "best_val_dice": train_result["best_val_dice"],
         "best_epoch": train_result["best_epoch"],
+        "per_sample_metrics_file": per_sample_path.name,
+        "n_test_samples": n_test_samples,
     }
     json_path.write_text(json.dumps(results, indent=2))
     print(f"\nSaved results: {json_path}")

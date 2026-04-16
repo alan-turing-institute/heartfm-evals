@@ -12,11 +12,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from PIL import Image
 from torch.utils.data import Dataset
 from tqdm import tqdm
 
@@ -472,6 +470,8 @@ class CachedFeatureDataset(Dataset):
             "features": data["features"],  # (C, h, w)
             "label": data["label"],  # (H, W)
             "pid": entry["pid"],
+            "is_ed": entry["is_ed"],
+            "z_idx": entry["z_idx"],
         }
 
 
@@ -497,6 +497,7 @@ class CachedVolumeDataset(Dataset):
             "label": data["label"],  # (1, H, W, Z)
             "n_slices": data["n_slices"],
             "pid": entry["pid"],
+            "is_ed": entry["is_ed"],
         }
         for layer_idx in self.layer_indices:
             key = f"layer_{layer_idx}"
@@ -526,6 +527,7 @@ class CachedCinemaVolumeDataset(Dataset):
             "label": data["label"],  # (1, H, W, Z)
             "n_slices": data["n_slices"],
             "pid": entry["pid"],
+            "is_ed": entry["is_ed"],
             "vit_features": data["vit_features"],
         }
         for i in range(self.n_conv_skips):

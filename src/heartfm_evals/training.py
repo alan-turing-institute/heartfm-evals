@@ -3,6 +3,8 @@
 Provides:
 - ``train_one_epoch()`` / ``evaluate()``: 2D slice-level training/eval.
 - ``train_one_epoch_vol()`` / ``evaluate_vol()``: 3D volume-level training/eval.
+- ``evaluate_per_sample()`` / ``evaluate_vol_per_sample()``: test-only
+  per-sample Dice reporting.
 - ``train_segmentation()``: High-level wrapper with early stopping and LR scheduling.
 """
 
@@ -14,10 +16,14 @@ import torch.nn as nn
 
 from heartfm_evals.constants import CLASS_NAMES, NUM_CLASSES
 from heartfm_evals.losses import MaskedVolumeLoss
-from heartfm_evals.metrics import dice_score, macro_dice
+from heartfm_evals.metrics import (
+    dice_score,
+    macro_dice,
+    per_sample_dice_metrics,
+)
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
-_NON_MODEL_KEYS = {"label", "n_slices", "pid"}
+_NON_MODEL_KEYS = {"is_ed", "label", "n_slices", "pid", "z_idx"}
 
 
 def _batch_to_device(batch: dict, device: torch.device) -> dict[str, torch.Tensor]:
@@ -27,6 +33,18 @@ def _batch_to_device(batch: dict, device: torch.device) -> dict[str, torch.Tenso
         for k, v in batch.items()
         if k not in _NON_MODEL_KEYS and isinstance(v, torch.Tensor)
     }
+
+
+def _batch_item(batch_value, idx: int):
+    """Extract a Python scalar or object from a collated batch value."""
+    if isinstance(batch_value, torch.Tensor):
+        return batch_value[idx].item()
+    return batch_value[idx]
+
+
+def _frame_name(is_ed: bool) -> str:
+    """Return the frame name for a boolean ED/ES indicator."""
+    return "ed" if is_ed else "es"
 
 
 # ── 2D Training ─────────────────────────────────────────────────────────────
@@ -89,6 +107,37 @@ def evaluate(
     m_dice = macro_dice(all_preds_arr, all_labels_arr)
 
     return {"per_class_dice": per_class, "macro_dice": m_dice}
+
+
+@torch.inference_mode()
+def evaluate_per_sample(
+    model: nn.Module,
+    dataloader,
+    device: torch.device,
+) -> list[dict]:
+    """Evaluate on cached 2D features and return one metrics row per slice."""
+    model.eval()
+    rows: list[dict] = []
+
+    for batch in dataloader:
+        features = batch["features"].to(device)
+        labels = batch["label"]
+
+        logits = model(features)
+        preds = logits.argmax(dim=1).cpu()  # (B, H, W)
+
+        for i in range(preds.shape[0]):
+            is_ed = bool(_batch_item(batch["is_ed"], i))
+            row = {
+                "pid": str(_batch_item(batch["pid"], i)),
+                "frame": _frame_name(is_ed),
+                "is_ed": is_ed,
+                "z_idx": int(_batch_item(batch["z_idx"], i)),
+            }
+            row.update(per_sample_dice_metrics(preds[i].numpy(), labels[i].numpy()))
+            rows.append(row)
+
+    return rows
 
 
 # ── 3D Volume Training ──────────────────────────────────────────────────────
@@ -166,6 +215,43 @@ def evaluate_vol(
     results["macro_dice"] = float(macro_dice(all_preds_arr, all_labels_arr))
 
     return results
+
+
+@torch.inference_mode()
+def evaluate_vol_per_sample(
+    model: nn.Module,
+    dataloader,
+    device: torch.device,
+    **_kwargs,
+) -> list[dict]:
+    """Evaluate on cached volume features and return one row per patient-frame."""
+    model.eval()
+    rows: list[dict] = []
+
+    for batch in dataloader:
+        batch_gpu = _batch_to_device(batch, device)
+
+        labels = batch["label"]  # (B, 1, H, W, Z)
+        n_slices = batch["n_slices"]  # (B,)
+
+        logits = model(batch_gpu)
+        preds = logits.argmax(dim=1).cpu()  # (B, H, W, Z)
+
+        for i in range(preds.shape[0]):
+            ns = int(_batch_item(n_slices, i))
+            is_ed = bool(_batch_item(batch["is_ed"], i))
+            pred_i = preds[i, :, :, :ns].numpy()
+            label_i = labels[i, 0, :, :, :ns].numpy()
+            row = {
+                "pid": str(_batch_item(batch["pid"], i)),
+                "frame": _frame_name(is_ed),
+                "is_ed": is_ed,
+                "n_slices": ns,
+            }
+            row.update(per_sample_dice_metrics(pred_i, label_i))
+            rows.append(row)
+
+    return rows
 
 
 # ── High-Level Training Wrapper ──────────────────────────────────────────────
