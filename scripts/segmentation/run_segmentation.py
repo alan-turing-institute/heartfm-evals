@@ -44,9 +44,10 @@ from heartfm_evals.reproducibility import set_seed
 from heartfm_evals.training import (
     evaluate,
     evaluate_per_sample,
+    evaluate_per_stack,
     evaluate_vol,
-    evaluate_vol_per_slice,
     evaluate_vol_per_sample,
+    evaluate_vol_per_slice,
     train_segmentation,
 )
 
@@ -143,7 +144,7 @@ def compute_class_weights(
 def metric_columns(metric_level: str) -> list[str]:
     """Return output columns for a metrics CSV."""
     base_columns = ["pid", "frame", "is_ed"]
-    if metric_level == "volume":
+    if metric_level in {"stack", "volume"}:
         base_columns.append("n_slices")
     elif metric_level == "slice":
         base_columns.append("z_idx")
@@ -160,7 +161,11 @@ def save_metrics_csv(
 ) -> int:
     """Write metrics rows to CSV in a deterministic order."""
     df = pd.DataFrame(rows, columns=metric_columns(metric_level))
-    sort_columns = ["pid", "frame"] if metric_level == "volume" else ["pid", "frame", "z_idx"]
+    sort_columns = (
+        ["pid", "frame"]
+        if metric_level in {"stack", "volume"}
+        else ["pid", "frame", "z_idx"]
+    )
     if not df.empty:
         df = df.sort_values(sort_columns, kind="stable").reset_index(drop=True)
     df.to_csv(output_path, index=False)
@@ -416,18 +421,20 @@ def main() -> None:
     # ── Evaluate on test set ──
     eval_fn = evaluate_vol if is_volume else evaluate
     test_metrics = eval_fn(decoder, test_loader, device)
-    per_sample_eval_fn = evaluate_vol_per_sample if is_volume else evaluate_per_sample
-    per_sample_rows = per_sample_eval_fn(decoder, test_loader, device)
-    per_sample_path = json_path.with_name(f"{json_path.stem}_per_sample.csv")
-    metric_level = "volume" if is_volume else "slice"
-    n_test_samples = save_metrics_csv(
-        per_sample_rows,
-        per_sample_path,
-        metric_level=metric_level,
-    )
+    per_sample_path: Path | None = None
+    n_test_samples: int | None = None
     per_slice_path: Path | None = None
     n_test_slices: int | None = None
+    per_stack_path: Path | None = None
+    n_test_stacks: int | None = None
     if is_volume:
+        per_sample_rows = evaluate_vol_per_sample(decoder, test_loader, device)
+        per_sample_path = json_path.with_name(f"{json_path.stem}_per_sample.csv")
+        n_test_samples = save_metrics_csv(
+            per_sample_rows,
+            per_sample_path,
+            metric_level="volume",
+        )
         per_slice_rows = evaluate_vol_per_slice(decoder, test_loader, device)
         per_slice_path = json_path.with_name(f"{json_path.stem}_per_slice.csv")
         n_test_slices = save_metrics_csv(
@@ -435,17 +442,36 @@ def main() -> None:
             per_slice_path,
             metric_level="slice",
         )
+    else:
+        per_slice_rows = evaluate_per_sample(decoder, test_loader, device)
+        per_slice_path = json_path.with_name(f"{json_path.stem}_per_slice.csv")
+        n_test_slices = save_metrics_csv(
+            per_slice_rows,
+            per_slice_path,
+            metric_level="slice",
+        )
+        per_stack_rows = evaluate_per_stack(decoder, test_loader, device)
+        per_stack_path = json_path.with_name(f"{json_path.stem}_per_stack.csv")
+        n_test_stacks = save_metrics_csv(
+            per_stack_rows,
+            per_stack_path,
+            metric_level="stack",
+        )
 
     print("\nTest Results:")
     print("Per-class Dice:")
     for name, d in test_metrics["per_class_dice"].items():
         print(f"  {name:>3s}: {d:.4f}")
     print(f"Macro Dice (excl. BG): {test_metrics['macro_dice']:.4f}")
-    print(f"Per-sample metrics rows: {n_test_samples}")
-    print(f"Per-sample metrics saved to: {per_sample_path}")
+    if per_sample_path is not None and n_test_samples is not None:
+        print(f"Per-sample metrics rows: {n_test_samples}")
+        print(f"Per-sample metrics saved to: {per_sample_path}")
     if per_slice_path is not None and n_test_slices is not None:
         print(f"Per-slice metrics rows: {n_test_slices}")
         print(f"Per-slice metrics saved to: {per_slice_path}")
+    if per_stack_path is not None and n_test_stacks is not None:
+        print(f"Per-stack metrics rows: {n_test_stacks}")
+        print(f"Per-stack metrics saved to: {per_stack_path}")
 
     # ── Save results ──
     results = {
@@ -470,12 +496,16 @@ def main() -> None:
         "training_history": train_result["history"],
         "best_val_dice": train_result["best_val_dice"],
         "best_epoch": train_result["best_epoch"],
-        "per_sample_metrics_file": per_sample_path.name,
-        "n_test_samples": n_test_samples,
     }
+    if per_sample_path is not None and n_test_samples is not None:
+        results["per_sample_metrics_file"] = per_sample_path.name
+        results["n_test_samples"] = n_test_samples
     if per_slice_path is not None and n_test_slices is not None:
         results["per_slice_metrics_file"] = per_slice_path.name
         results["n_test_slices"] = n_test_slices
+    if per_stack_path is not None and n_test_stacks is not None:
+        results["per_stack_metrics_file"] = per_stack_path.name
+        results["n_test_stacks"] = n_test_stacks
     json_path.write_text(json.dumps(results, indent=2))
     print(f"\nSaved results: {json_path}")
 

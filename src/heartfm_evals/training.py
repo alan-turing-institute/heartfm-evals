@@ -5,6 +5,7 @@ Provides:
 - ``train_one_epoch_vol()`` / ``evaluate_vol()``: 3D volume-level training/eval.
 - ``evaluate_per_sample()`` / ``evaluate_vol_per_sample()``: test-only
   per-sample Dice reporting.
+- ``evaluate_per_stack()``: test-only 2D whole-stack Dice reporting.
 - ``evaluate_vol_per_slice()``: test-only 3D per-slice Dice reporting.
 - ``train_segmentation()``: High-level wrapper with early stopping and LR scheduling.
 """
@@ -138,6 +139,50 @@ def evaluate_per_sample(
             row.update(per_sample_dice_metrics(preds[i].numpy(), labels[i].numpy()))
             rows.append(row)
 
+    return rows
+
+
+@torch.inference_mode()
+def evaluate_per_stack(
+    model: nn.Module,
+    dataloader,
+    device: torch.device,
+) -> list[dict]:
+    """Evaluate on cached 2D features and return one metrics row per patient-frame."""
+    model.eval()
+    grouped: dict[tuple[str, bool], list[tuple[int, np.ndarray, np.ndarray]]] = {}
+
+    for batch in dataloader:
+        features = batch["features"].to(device)
+        labels = batch["label"]
+
+        logits = model(features)
+        preds = logits.argmax(dim=1).cpu()  # (B, H, W)
+
+        for i in range(preds.shape[0]):
+            pid = str(_batch_item(batch["pid"], i))
+            is_ed = bool(_batch_item(batch["is_ed"], i))
+            z_idx = int(_batch_item(batch["z_idx"], i))
+            key = (pid, is_ed)
+            grouped.setdefault(key, []).append(
+                (z_idx, preds[i].numpy(), labels[i].numpy())
+            )
+
+    rows: list[dict] = []
+    for (pid, is_ed), slices in grouped.items():
+        slices_sorted = sorted(slices, key=lambda item: item[0])
+        preds_arr = np.stack([pred for _, pred, _ in slices_sorted])
+        labels_arr = np.stack([label for _, _, label in slices_sorted])
+        row = {
+            "pid": pid,
+            "frame": _frame_name(is_ed),
+            "is_ed": is_ed,
+            "n_slices": len(slices_sorted),
+        }
+        row.update(per_sample_dice_metrics(preds_arr, labels_arr))
+        rows.append(row)
+
+    rows.sort(key=lambda row: (row["pid"], row["frame"]))
     return rows
 
 
