@@ -200,7 +200,7 @@ def build_results_dict(
 
 def main():
     args = parse_args()
-    set_seed(args.seed)
+    # set_seed(args.seed)
     model_name = derive_model_name(args)
 
     tag = eval_mode_tag(args.eval_mode, True)

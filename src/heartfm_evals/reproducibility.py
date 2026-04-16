@@ -16,10 +16,10 @@ def set_seed(seed: int = 0) -> None:
     with ``warn_only=True`` so that operations without a deterministic
     implementation emit a warning instead of raising an error.
     """
-    # random.seed(seed)
-    # np.random.seed(seed)
-    # torch.manual_seed(seed)
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
 
-    # torch.backends.cudnn.deterministic = True
-    # torch.backends.cudnn.benchmark = False
-    # torch.use_deterministic_algorithms(True, warn_only=True)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+    torch.use_deterministic_algorithms(True, warn_only=True)

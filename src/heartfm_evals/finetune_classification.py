@@ -240,7 +240,7 @@ def finetune_sweep_and_train(
         sweep_results: List of dicts with keys lr, mean_cv_acc, std_cv_acc.
         scaler: Fitted StandardScaler used during training (must be applied at eval).
     """
-    set_seed(seed)
+    # set_seed(seed)
 
     labels_np = train_labels.numpy()
     use_val_split = val_features is not None and val_labels is not None

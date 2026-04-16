@@ -174,7 +174,7 @@ def save_metrics_csv(
 
 def main() -> None:
     args = parse_args()
-    set_seed(args.seed)
+    # set_seed(args.seed)
     device = detect_device(args.device)
     model_name = derive_model_name(args)
     cache_dir = derive_cache_dir(args, model_name)
