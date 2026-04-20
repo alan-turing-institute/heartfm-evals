@@ -1,0 +1,6 @@
+Backbone,Model,Embed Dim,Eval Mode,Pooling,5-way Acc,5-way F1,5-way AUC,Binary Acc,Binary F1,Binary Sens,Binary Spec,Binary AUC
+CineMA,cinema_pretrained,768,logreg,cls,0.6400,0.6399,0.8935,0.8000,0.8864,0.9750,0.1000,0.8700
+CineMA,cinema_pretrained,768,logreg,gap,0.6400,0.6392,0.9055,0.8600,0.9114,0.9000,0.7000,0.9350
+Dino,dinov3_vits16,384,logreg,cls,0.5000,0.4976,0.8275,0.7600,0.8537,0.8750,0.3000,0.7500
+Dino,dinov3_vits16,384,logreg,gap,0.4800,0.4760,0.8280,0.7600,0.8500,0.8500,0.4000,0.7375
+SAM,sam_vit_base,768,logreg,gap,0.5800,0.5816,0.8580,0.8200,0.8966,0.9750,0.2000,0.8875
