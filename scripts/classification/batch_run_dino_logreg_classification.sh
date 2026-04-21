@@ -5,7 +5,7 @@
 #SBATCH --error=logs/classification/%A_%a.err
 #SBATCH --ntasks=1
 #SBATCH --gres=gpu:1
-#SBATCH --time=02:00:00
+#SBATCH --time=04:00:00
 
 # DINOv3 logreg classification array job.
 # 3 datasets × 6 configs = 18 tasks (indices 0–17).

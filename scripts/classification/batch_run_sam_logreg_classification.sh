@@ -5,7 +5,7 @@
 #SBATCH --error=logs/classification/%A_%a.err
 #SBATCH --ntasks=1
 #SBATCH --gres=gpu:1
-#SBATCH --time=02:00:00
+#SBATCH --time=06:00:00
 
 # SAM (v1) logreg classification array job — gap pooling only (no CLS token).
 # 3 datasets × 3 models = 9 tasks (indices 0–8).
