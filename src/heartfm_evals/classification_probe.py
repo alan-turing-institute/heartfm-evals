@@ -1,6 +1,6 @@
 """Logistic-regression classification probe for patient-level pathology prediction.
 
-Supports three frozen backbones with a shared downstream protocol:
+Supports four frozen backbones with a shared downstream protocol:
 
     1. **DINOv3**: extract CLS token or GAP of patch tokens per 2D slice →
        one ``(embed_dim,)`` embedding per slice.
@@ -10,8 +10,10 @@ Supports three frozen backbones with a shared downstream protocol:
     3. **SAM**: run ``get_image_embeddings()`` on each 2D slice (converted to
        RGB via ``SamImageProcessor``), global-average-pool the spatial feature
        map ``(C, h, w)`` → one ``(C,)`` embedding per slice (no CLS token).
+    4. **SAM2**: run the Hiera vision encoder on each 2D slice, global-average-
+       pool the last-stage hidden state → one ``(embed_dim,)`` embedding per slice.
 
-DINOv3 and SAM produce one embedding per 2D slice; CineMA produces one
+DINOv3, SAM, and SAM2 produce one embedding per 2D slice; CineMA produces one
 embedding per 3D volume.  Patient-level features are built identically:
 mean-pool ED embeddings, mean-pool ES embeddings, concatenate →
 ``(2 × embed_dim,)`` vector → sklearn LogisticRegression with L2 penalty
@@ -413,6 +415,75 @@ def cache_sam_cls_features(
                 hidden = layer(hidden)
             # hidden: (1, h, w, C) — before the neck projection
             cls_token = hidden.squeeze(0).mean(dim=(0, 1)).cpu()  # (C,)
+
+            torch.save({"cls_token": cls_token}, fpath)
+            manifest.append({"path": fpath, "pid": pid, "is_ed": is_ed, "z_idx": z})
+
+    return manifest
+
+
+@torch.inference_mode()
+def cache_sam2_cls_features(
+    sam2_model: nn.Module,
+    image_processor,
+    cinema_dataset,
+    cache_dir: Path,
+    layer_indices: tuple[int, ...] = (10,),
+    device: torch.device | None = None,
+) -> list[dict]:
+    """Extract and cache GAP SAM2 Hiera vision-encoder embeddings, one .pt per slice.
+
+    For each 2D slice, runs SAM2's vision encoder with ``output_hidden_states=True``
+    and global-average-pools the hidden state at ``layer_indices[-1]``
+    ``(H', W', C)`` → ``(C,)``, saved as ``{"cls_token": Tensor(C,)}``.
+
+    Args:
+        sam2_model: Frozen ``Sam2Model`` in eval mode.
+        image_processor: ``Sam2Processor`` for pre-processing slices.
+        cinema_dataset: CineMA EndDiastoleEndSystoleDataset.
+        cache_dir: Directory to save cached tokens.
+        layer_indices: Hidden-state indices from the backbone config; the last
+            one is used for classification (final stage output).
+        device: Device for inference.
+
+    Returns:
+        Manifest — list of dicts with keys ``path``, ``pid``, ``is_ed``,
+        ``z_idx``.
+    """
+    from PIL import Image
+
+    last_idx = layer_indices[-1]
+    cache_dir = Path(cache_dir)
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    manifest: list[dict] = []
+
+    for sample_idx in tqdm(range(len(cinema_dataset)), desc="Caching SAM2 features"):
+        sample = cinema_dataset[sample_idx]
+        image_3d = sample["sax_image"]  # (1, H, W, z)
+        n_slices = int(sample["n_slices"])
+        pid = sample["pid"]
+        is_ed = sample["is_ed"]
+        frame = "ed" if is_ed else "es"
+
+        for z in range(n_slices):
+            fname = f"{pid}_{frame}_z{z:02d}.pt"
+            fpath = cache_dir / fname
+
+            if fpath.exists():
+                manifest.append({"path": fpath, "pid": pid, "is_ed": is_ed, "z_idx": z})
+                continue
+
+            image_2d = image_3d[0, :, :, z]  # (H, W) in [0, 1]
+            img_np = (image_2d.clamp(0, 1).cpu().numpy() * 255.0).astype(np.uint8)
+            pil = Image.fromarray(img_np, mode="L").convert("RGB")
+
+            proc = image_processor(images=pil, return_tensors="pt")
+            pixel_values = proc["pixel_values"].to(device)
+
+            enc_out = sam2_model.vision_encoder(pixel_values, output_hidden_states=True)
+            hidden_states = enc_out.hidden_states  # tuple of (1, H', W', C) — channels-last
+            feat = hidden_states[last_idx]  # (1, H', W', C)
+            cls_token = feat.squeeze(0).mean(dim=(0, 1)).cpu()  # (C,)
 
             torch.save({"cls_token": cls_token}, fpath)
             manifest.append({"path": fpath, "pid": pid, "is_ed": is_ed, "z_idx": z})
