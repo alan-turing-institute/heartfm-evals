@@ -1,0 +1,7 @@
+Backbone,Model,Embed Dim,Decoder,Probe Layers,Trainable Params,BG Dice,LV Dice,MYO Dice,RV Dice,Macro Dice,Best Val Dice,Best Epoch
+CineMA,cinema_pretrained,768,Linear,0,4612,0.9829,0.7614,0.5766,0.6421,0.6600,0.6918,41
+CineMA,cinema_pretrained,768,Conv,0,1033220,0.9833,0.7949,0.6102,0.6836,0.6962,0.7277,59
+CineMA,cinema_pretrained,768,UNETR,"3,6,9,11",39083302,0.9925,0.9086,0.7999,0.8562,0.8549,0.8684,31
+Dino,dinov3_vits16,384,Linear,11,2308,0.9872,0.8221,0.6376,0.7240,0.7279,0.7425,31
+Dino,dinov3_vits16,384,Conv,"3,6,9,11",1917956,0.9918,0.8975,0.7770,0.8340,0.8362,0.8494,56
+Dino,dinov3_vits16,384,UNETR,"3,6,9,11",31016868,0.9914,0.8992,0.7765,0.8382,0.8380,0.8542,25

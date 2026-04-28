@@ -313,18 +313,28 @@ def extract_sam2_2d_features(
     sam2_model: nn.Module,
     image_processor,
     image_2d: torch.Tensor,
+    layer_indices: tuple[int, ...],
     device: torch.device | None = None,
+    grid_size: int = GRID_SIZE,
 ) -> torch.Tensor:
-    """Extract SAM2 image embeddings for a single 2D slice.
+    """Extract multi-layer SAM2 Hiera features for a single 2D slice.
+
+    Uses ``output_hidden_states=True`` to extract intermediate Hiera block
+    outputs at the specified layer indices, then downsamples each to
+    *grid_size* × *grid_size* and concatenates along the channel dimension.
+    This mirrors ``extract_sam_volume_features`` for the 2D case.
 
     Args:
         sam2_model: Frozen SAM2 model in eval mode.
         image_processor: SAM2 processor for image pre-processing.
         image_2d: (H, W) tensor in [0, 1].
+        layer_indices: Which intermediate Hiera block outputs to extract.
         device: Device for inference.
+        grid_size: Spatial size to downsample each feature map to.
 
     Returns:
-        Feature tensor ``(C, h, w)`` from the last stage of the image encoder.
+        Feature tensor ``(embed_dim * n_layers, grid_size, grid_size)``
+        with layer features concatenated along the channel dimension.
     """
     img_np = (image_2d.clamp(0, 1).cpu().numpy() * 255.0).astype(np.uint8)
     pil = Image.fromarray(img_np, mode="L").convert("RGB")
@@ -334,5 +344,16 @@ def extract_sam2_2d_features(
     if device is not None:
         pixel_values = pixel_values.to(device)
 
-    feats = sam2_model.get_image_embeddings(pixel_values)
-    return feats[-1].squeeze(0).cpu()  # (C, h, w)
+    enc_out = sam2_model.vision_encoder(pixel_values, output_hidden_states=True)
+    hidden_states = enc_out.hidden_states  # tuple of (1, H', W', C) — channels-last
+
+    feats = []
+    for idx in layer_indices:
+        feat = hidden_states[idx]  # (1, H', W', C)
+        feat = feat.permute(0, 3, 1, 2)  # (1, C, H', W')
+        feat = F.interpolate(
+            feat, size=(grid_size, grid_size), mode="bilinear", align_corners=False
+        )
+        feats.append(feat.squeeze(0).cpu())  # (C, grid_size, grid_size)
+
+    return torch.cat(feats, dim=0)  # (C * n_layers, grid_size, grid_size)

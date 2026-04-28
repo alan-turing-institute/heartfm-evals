@@ -240,7 +240,7 @@ def main() -> None:
     print(f"Train: {len(train_ds)}, Val: {len(val_ds)}, Test: {len(test_ds)}")
 
     # ── Cache features ──
-    sam_processor = config.get("processor")
+    sam_processor = config.get("sam2_processor")
 
     if is_volume:
         # 3D volume caching
@@ -313,13 +313,13 @@ def main() -> None:
             )
         else:  # sam2
             train_manifest = cache_sam2_2d_features(
-                backbone, sam_processor, train_ds, cache_dir / "train", device
+                backbone, sam_processor, train_ds, cache_dir / "train", layer_indices, device
             )
             val_manifest = cache_sam2_2d_features(
-                backbone, sam_processor, val_ds, cache_dir / "val", device
+                backbone, sam_processor, val_ds, cache_dir / "val", layer_indices, device
             )
             test_manifest = cache_sam2_2d_features(
-                backbone, sam_processor, test_ds, cache_dir / "test", device
+                backbone, sam_processor, test_ds, cache_dir / "test", layer_indices, device
             )
 
     print(

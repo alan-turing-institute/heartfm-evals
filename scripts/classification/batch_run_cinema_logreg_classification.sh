@@ -5,7 +5,7 @@
 #SBATCH --error=logs/classification/%A_%a.err
 #SBATCH --ntasks=1
 #SBATCH --gres=gpu:1
-#SBATCH --time=02:00:00
+#SBATCH --time=04:00:00
 
 # CineMA logreg classification array job.
 # 3 datasets × 2 poolings = 6 tasks (indices 0–5).

@@ -403,21 +403,27 @@ def cache_sam2_2d_features(
     image_processor,
     cinema_dataset,
     cache_dir: Path,
+    layer_indices: tuple[int, ...],
     device: torch.device | None = None,
 ) -> list[dict]:
-    """Cache per-slice SAM2 image embeddings for all slices in a dataset.
+    """Cache per-slice SAM2 multi-layer Hiera features for all slices in a dataset.
+
+    Features are stored under a ``layers_<idx>-...`` subdirectory so that caches
+    for different layer selections do not collide.
 
     Args:
         sam2_model: Frozen SAM2 model in eval mode.
         image_processor: SAM2 processor for image pre-processing.
         cinema_dataset: CineMA ``EndDiastoleEndSystoleDataset``.
-        cache_dir: Cache directory.
+        cache_dir: Root cache directory; a ``layers_`` subdirectory is appended.
+        layer_indices: Which intermediate Hiera block outputs to extract.
         device: Device for inference.
 
     Returns:
         List of dicts with keys: ``path``, ``pid``, ``is_ed``, ``z_idx``.
     """
-    cache_dir = Path(cache_dir)
+    layers_tag = "layers_" + "-".join(str(i) for i in sorted(layer_indices))
+    cache_dir = Path(cache_dir) / layers_tag
     cache_dir.mkdir(parents=True, exist_ok=True)
     manifest: list[dict] = []
 
@@ -444,7 +450,7 @@ def cache_sam2_2d_features(
             label_2d = label_3d[0, :, :, z_idx]  # (H, W)
 
             feats = extract_sam2_2d_features(
-                sam2_model, image_processor, image_2d, device
+                sam2_model, image_processor, image_2d, layer_indices, device
             )
 
             torch.save({"features": feats, "label": label_2d.long()}, fpath)
