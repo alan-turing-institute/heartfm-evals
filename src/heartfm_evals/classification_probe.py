@@ -428,22 +428,24 @@ def cache_sam2_cls_features(
     image_processor,
     cinema_dataset,
     cache_dir: Path,
-    layer_indices: tuple[int, ...] = (10,),
     device: torch.device | None = None,
 ) -> list[dict]:
     """Extract and cache GAP SAM2 Hiera vision-encoder embeddings, one .pt per slice.
 
     For each 2D slice, runs SAM2's vision encoder with ``output_hidden_states=True``
-    and global-average-pools the hidden state at ``layer_indices[-1]``
+    and global-average-pools ``hidden_states[-1]`` (the true final block, Stage 4)
     ``(H', W', C)`` → ``(C,)``, saved as ``{"cls_token": Tensor(C,)}``.
+
+    Stage 4 is used rather than Stage 3 (``layer_indices[-1]``) because Stage 4
+    is the model's genuine final output — semantically richer and analogous to
+    what DINOv3, CineMA, and SAM v1 use for classification.  The corresponding
+    channel dimension is ``cls_embed_dim`` in ``SAM2_CONFIGS`` (768/768/896/1152).
 
     Args:
         sam2_model: Frozen ``Sam2Model`` in eval mode.
         image_processor: ``Sam2Processor`` for pre-processing slices.
         cinema_dataset: CineMA EndDiastoleEndSystoleDataset.
         cache_dir: Directory to save cached tokens.
-        layer_indices: Hidden-state indices from the backbone config; the last
-            one is used for classification (final stage output).
         device: Device for inference.
 
     Returns:
@@ -452,7 +454,6 @@ def cache_sam2_cls_features(
     """
     from PIL import Image
 
-    last_idx = layer_indices[-1]
     cache_dir = Path(cache_dir)
     cache_dir.mkdir(parents=True, exist_ok=True)
     manifest: list[dict] = []
@@ -482,7 +483,7 @@ def cache_sam2_cls_features(
 
             enc_out = sam2_model.vision_encoder(pixel_values, output_hidden_states=True)
             hidden_states = enc_out.hidden_states  # tuple of (1, H', W', C) — channels-last
-            feat = hidden_states[last_idx]  # (1, H', W', C)
+            feat = hidden_states[-1]  # (1, H', W', C) — Stage 4, true final block
             cls_token = feat.squeeze(0).mean(dim=(0, 1)).cpu()  # (C,)
 
             torch.save({"cls_token": cls_token}, fpath)

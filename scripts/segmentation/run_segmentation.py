@@ -213,6 +213,9 @@ def main() -> None:
     backbone, config = load_backbone(args.backbone, device, **backbone_kwargs)
     embed_dim = config["embed_dim"]
     layer_indices = tuple(config.get("layer_indices", (3, 6, 9, 11)))
+    # SAM2 only: per-stage channel counts for the 4 layer_indices.
+    # None for DINOv3 and CineMA (uniform embed_dim).
+    stage_embed_dims: tuple[int, ...] | None = config.get("stage_embed_dims")
 
     # Determine which layers to use for probe
     if args.use_layers is not None:
@@ -364,6 +367,25 @@ def main() -> None:
 
     # ── Build decoder ──
     decoder_kwargs: dict = {}
+
+    # For SAM2 multi-scale, each Hiera stage has a different channel count.
+    # Determine per-layer dims and the effective embed_dim for the decoder.
+    #
+    # linear_probe  — probes only the last layer (Stage 4).  embed_dim must be
+    #                 Stage-4 channels; cached_embed_dims enables correct channel
+    #                 selection from the multi-scale concatenated cache tensor.
+    # conv_decoder  — takes the full concatenated tensor; in_channels computed
+    #                 from sum(embed_dims) inside get_decoder.
+    # unetr         — each skip adapter gets its own in_chans from embed_dims.
+    if stage_embed_dims is not None:
+        # Stage 4 channels = what the linear probe actually operates on
+        decoder_embed_dim = stage_embed_dims[-1] if args.decoder == "linear_probe" else embed_dim
+        # embed_dims used by conv_decoder / unetr (not linear_probe — it uses embed_dim per layer)
+        decoder_embed_dims = stage_embed_dims if args.decoder != "linear_probe" else None
+    else:
+        decoder_embed_dim = embed_dim
+        decoder_embed_dims = None
+
     if args.decoder == "linear_probe":
         decoder_kwargs["dropout"] = args.dropout
         # Only set cached_layers when cache has more layers than the probe uses.
@@ -372,11 +394,15 @@ def main() -> None:
             args.backbone == "cinema" and not is_volume
         ):
             decoder_kwargs["cached_layers"] = layer_indices
+            if stage_embed_dims is not None:
+                decoder_kwargs["cached_embed_dims"] = stage_embed_dims
+
     decoder = get_decoder(
         decoder_type=args.decoder,
         backbone_type=args.backbone,
-        embed_dim=embed_dim,
+        embed_dim=decoder_embed_dim,
         layer_indices=use_layers,
+        embed_dims=decoder_embed_dims,
         **decoder_kwargs,
     ).to(device)
 

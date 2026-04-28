@@ -324,6 +324,11 @@ def extract_sam2_2d_features(
     *grid_size* × *grid_size* and concatenates along the channel dimension.
     This mirrors ``extract_sam_volume_features`` for the 2D case.
 
+    When ``layer_indices`` spans multiple Hiera stages (as in the multi-scale
+    segmentation config), each stage has a different channel count.  The
+    returned tensor has total channels equal to the *sum* of per-stage channel
+    counts — not ``embed_dim * n_layers``.
+
     Args:
         sam2_model: Frozen SAM2 model in eval mode.
         image_processor: SAM2 processor for image pre-processing.
@@ -333,8 +338,10 @@ def extract_sam2_2d_features(
         grid_size: Spatial size to downsample each feature map to.
 
     Returns:
-        Feature tensor ``(embed_dim * n_layers, grid_size, grid_size)``
-        with layer features concatenated along the channel dimension.
+        Feature tensor ``(sum(C_i), grid_size, grid_size)`` where ``C_i`` is
+        the channel count at ``layer_indices[i]``.  For uniform-channel
+        backbones this simplifies to ``(embed_dim * n_layers, grid_size,
+        grid_size)``.
     """
     img_np = (image_2d.clamp(0, 1).cpu().numpy() * 255.0).astype(np.uint8)
     pil = Image.fromarray(img_np, mode="L").convert("RGB")

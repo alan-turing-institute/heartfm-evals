@@ -299,10 +299,9 @@ def main():
         backbone_kwargs["auto_download"] = not args.no_auto_download
 
     backbone, info = _load_backbone(args.backbone, device, **backbone_kwargs)
-    embed_dim = info["embed_dim"]
+    embed_dim = info.get("cls_embed_dim", info["embed_dim"]) if args.backbone == "sam2" else info["embed_dim"]
     sam_image_processor = info.get("sam_image_processor")
     sam2_processor = info.get("sam2_processor")
-    sam2_layer_indices = info.get("layer_indices")
     print(f"Loaded backbone: embed_dim={embed_dim}")
 
     # ── Pathology maps ──
@@ -336,7 +335,7 @@ def main():
         )
     elif args.backbone == "sam2":
         cache_fn = lambda m, ds, cd, dev: cache_sam2_cls_features(
-            m, sam2_processor, ds, cd, layer_indices=sam2_layer_indices, device=dev
+            m, sam2_processor, ds, cd, device=dev
         )
     else:
         cache_fn = lambda m, ds, cd, dev: cache_cls_features(
