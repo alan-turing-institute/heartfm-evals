@@ -65,25 +65,21 @@ DINOV3_CONFIGS: dict[str, dict[str, Any]] = {
 SAM2_CONFIGS: dict[str, dict[str, Any]] = {
     "facebook/sam2.1-hiera-tiny": {
         "embed_dim": 384,
-        "cls_embed_dim": 768,
         "layer_indices": (1, 3, 10, 12),
         "stage_embed_dims": (96, 192, 384, 768),
     },
     "facebook/sam2.1-hiera-small": {
         "embed_dim": 384,
-        "cls_embed_dim": 768,
         "layer_indices": (1, 3, 14, 16),
         "stage_embed_dims": (96, 192, 384, 768),
     },
     "facebook/sam2.1-hiera-base-plus": {
         "embed_dim": 448,
-        "cls_embed_dim": 896,
         "layer_indices": (2, 5, 21, 24),
         "stage_embed_dims": (112, 224, 448, 896),
     },
     "facebook/sam2.1-hiera-large": {
         "embed_dim": 576,
-        "cls_embed_dim": 1152,
         "layer_indices": (2, 8, 44, 48),
         "stage_embed_dims": (144, 288, 576, 1152),
     },
@@ -234,6 +230,7 @@ def _load_sam(
         "backbone_type": "sam",
         "model_name": model_id.split("/")[-1].replace("-", "_"),
         "embed_dim": embed_dim,
+        "layer_indices": (2, 5, 8, 11),
         "sam_image_processor": processor,
     }
 

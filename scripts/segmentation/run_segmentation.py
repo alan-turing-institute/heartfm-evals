@@ -33,6 +33,7 @@ from heartfm_evals.caching import (
     cache_dino_volume_features,
     cache_features,
     cache_sam2_2d_features,
+    cache_sam_2d_features,
     cache_sam_volume_features,
 )
 from heartfm_evals.constants import CLASS_NAMES, NUM_CLASSES
@@ -40,7 +41,6 @@ from heartfm_evals.data import load_segmentation_datasets
 from heartfm_evals.decoders import get_decoder
 from heartfm_evals.device import detect_device
 from heartfm_evals.losses import CombinedLoss, MaskedVolumeLoss, WeightedCombinedLoss
-from heartfm_evals.reproducibility import set_seed
 from heartfm_evals.training import (
     evaluate,
     evaluate_per_sample,
@@ -54,7 +54,9 @@ from heartfm_evals.training import (
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Unified segmentation evaluation")
-    p.add_argument("--backbone", required=True, choices=["dinov3", "cinema", "sam2"])
+    p.add_argument(
+        "--backbone", required=True, choices=["dinov3", "cinema", "sam", "sam2"]
+    )
     p.add_argument(
         "--decoder", required=True, choices=["linear_probe", "conv_decoder", "unetr"]
     )
@@ -67,6 +69,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--dinov3-model-name", default="dinov3_vits16")
     p.add_argument("--dinov3-repo-dir", default="models/dinov3/")
     p.add_argument("--dinov3-weights-path", default=None)
+    p.add_argument("--sam-model-id", default="facebook/sam-vit-base")
     p.add_argument("--sam2-model-id", default="facebook/sam2.1-hiera-base-plus")
     p.add_argument("--hf-cache-dir", type=Path, default=Path("model_weights/hf"))
 
@@ -106,6 +109,8 @@ def parse_args() -> argparse.Namespace:
 def derive_model_name(args: argparse.Namespace) -> str:
     if args.backbone == "cinema":
         return "cinema_pretrained"
+    if args.backbone == "sam":
+        return args.sam_model_id.split("/")[-1].replace("-", "_")
     if args.backbone == "sam2":
         return args.sam2_model_id.split("/")[-1].replace("-", "_").replace(".", "_")
     return args.dinov3_model_name
@@ -202,6 +207,10 @@ def main() -> None:
         backbone_kwargs["dinov3_repo_dir"] = args.dinov3_repo_dir
         if args.dinov3_weights_path:
             backbone_kwargs["dinov3_weights_path"] = args.dinov3_weights_path
+    elif args.backbone == "sam":
+        backbone_kwargs["sam_model_id"] = args.sam_model_id
+        backbone_kwargs["hf_cache_dir"] = str(args.hf_cache_dir)
+        backbone_kwargs["auto_download"] = not args.no_auto_download
     elif args.backbone == "sam2":
         backbone_kwargs["sam2_model_id"] = args.sam2_model_id
         backbone_kwargs["hf_cache_dir"] = str(args.hf_cache_dir)
@@ -243,7 +252,7 @@ def main() -> None:
     print(f"Train: {len(train_ds)}, Val: {len(val_ds)}, Test: {len(test_ds)}")
 
     # ── Cache features ──
-    sam_processor = config.get("sam2_processor")
+    sam_processor = config.get("sam_image_processor") or config.get("sam2_processor")
 
     if is_volume:
         # 3D volume caching
@@ -267,7 +276,7 @@ def main() -> None:
             test_manifest = cache_cinema_volume_features(
                 backbone, test_ds, cache_dir / "test", device
             )
-        else:  # sam2
+        else:  # sam or sam2
             train_manifest = cache_sam_volume_features(
                 backbone,
                 sam_processor,
@@ -314,15 +323,55 @@ def main() -> None:
             test_manifest = cache_cinema_2d_features(
                 backbone, test_ds, cache_dir / "test", device
             )
+        elif args.backbone == "sam":
+            train_manifest = cache_sam_2d_features(
+                backbone,
+                sam_processor,
+                train_ds,
+                cache_dir / "train",
+                layer_indices,
+                device,
+            )
+            val_manifest = cache_sam_2d_features(
+                backbone,
+                sam_processor,
+                val_ds,
+                cache_dir / "val",
+                layer_indices,
+                device,
+            )
+            test_manifest = cache_sam_2d_features(
+                backbone,
+                sam_processor,
+                test_ds,
+                cache_dir / "test",
+                layer_indices,
+                device,
+            )
         else:  # sam2
             train_manifest = cache_sam2_2d_features(
-                backbone, sam_processor, train_ds, cache_dir / "train", layer_indices, device
+                backbone,
+                sam_processor,
+                train_ds,
+                cache_dir / "train",
+                layer_indices,
+                device,
             )
             val_manifest = cache_sam2_2d_features(
-                backbone, sam_processor, val_ds, cache_dir / "val", layer_indices, device
+                backbone,
+                sam_processor,
+                val_ds,
+                cache_dir / "val",
+                layer_indices,
+                device,
             )
             test_manifest = cache_sam2_2d_features(
-                backbone, sam_processor, test_ds, cache_dir / "test", layer_indices, device
+                backbone,
+                sam_processor,
+                test_ds,
+                cache_dir / "test",
+                layer_indices,
+                device,
             )
 
     print(
@@ -379,9 +428,13 @@ def main() -> None:
     # unetr         — each skip adapter gets its own in_chans from embed_dims.
     if stage_embed_dims is not None:
         # Stage 4 channels = what the linear probe actually operates on
-        decoder_embed_dim = stage_embed_dims[-1] if args.decoder == "linear_probe" else embed_dim
+        decoder_embed_dim = (
+            stage_embed_dims[-1] if args.decoder == "linear_probe" else embed_dim
+        )
         # embed_dims used by conv_decoder / unetr (not linear_probe — it uses embed_dim per layer)
-        decoder_embed_dims = stage_embed_dims if args.decoder != "linear_probe" else None
+        decoder_embed_dims = (
+            stage_embed_dims if args.decoder != "linear_probe" else None
+        )
     else:
         decoder_embed_dim = embed_dim
         decoder_embed_dims = None

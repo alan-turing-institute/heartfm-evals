@@ -32,7 +32,6 @@ from heartfm_evals.classification_probe import (
     cache_cinema_cls_features,
     cache_cls_features,
     cache_sam_cls_features,
-    cache_sam2_cls_features,
     evaluate_binary_detection,
     evaluate_classification,
     get_pathology_classes,
@@ -46,13 +45,12 @@ from heartfm_evals.finetune_classification import (
     ClassificationHeadPredictor,
     finetune_sweep_and_train,
 )
-from heartfm_evals.reproducibility import set_seed
 
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Pathology classification evaluation")
     p.add_argument("--dataset", default="acdc", choices=["acdc", "mnm", "mnm2"])
-    p.add_argument("--backbone", required=True, choices=["cinema", "dinov3", "sam", "sam2"])
+    p.add_argument("--backbone", required=True, choices=["cinema", "dinov3", "sam"])
     p.add_argument("--eval-mode", required=True, choices=["logreg", "finetune"])
     p.add_argument("--pooling", default="cls", choices=["cls", "gap"])
     p.add_argument(
@@ -75,7 +73,6 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--dinov3-model-name", default="dinov3_vits16")
     p.add_argument("--dinov3-weights-path", default=None)
     p.add_argument("--sam-model-id", default="facebook/sam-vit-base")
-    p.add_argument("--sam2-model-id", default="facebook/sam2.1-hiera-base-plus")
     p.add_argument("--hf-cache-dir", type=Path, default=Path("model_weights/hf"))
     p.add_argument(
         "--cls-cache-dir",
@@ -92,7 +89,9 @@ def parse_args() -> argparse.Namespace:
     p.add_argument(
         "--no-auto-download", action="store_true", help="Disable HF auto-download"
     )
-    p.add_argument("--seed", type=int, default=0, help="Random seed for reproducibility")
+    p.add_argument(
+        "--seed", type=int, default=0, help="Random seed for reproducibility"
+    )
     args = p.parse_args()
 
     # Set defaults that depend on --dataset
@@ -113,8 +112,6 @@ def derive_model_name(args) -> str:
         return "cinema_pretrained"
     if args.backbone == "sam":
         return args.sam_model_id.split("/")[-1].replace("-", "_")
-    if args.backbone == "sam2":
-        return args.sam2_model_id.split("/")[-1].replace(".", "_").replace("-", "_")
     return args.dinov3_model_name
 
 
@@ -142,7 +139,7 @@ def build_results_dict(
     """Build a JSON-serialisable results dictionary."""
 
     def to_list(x):
-        if isinstance(x, (np.ndarray, torch.Tensor)):
+        if isinstance(x, np.ndarray | torch.Tensor):
             return x.tolist()
         return x
 
@@ -290,18 +287,13 @@ def main():
         backbone_kwargs["sam_model_id"] = args.sam_model_id
         backbone_kwargs["hf_cache_dir"] = str(args.hf_cache_dir)
         backbone_kwargs["auto_download"] = not args.no_auto_download
-    elif args.backbone == "sam2":
-        backbone_kwargs["sam2_model_id"] = args.sam2_model_id
-        backbone_kwargs["hf_cache_dir"] = str(args.hf_cache_dir)
-        backbone_kwargs["auto_download"] = not args.no_auto_download
     elif args.backbone == "cinema":
         backbone_kwargs["hf_cache_dir"] = str(args.hf_cache_dir)
         backbone_kwargs["auto_download"] = not args.no_auto_download
 
     backbone, info = _load_backbone(args.backbone, device, **backbone_kwargs)
-    embed_dim = info.get("cls_embed_dim", info["embed_dim"]) if args.backbone == "sam2" else info["embed_dim"]
+    embed_dim = info["embed_dim"]
     sam_image_processor = info.get("sam_image_processor")
-    sam2_processor = info.get("sam2_processor")
     print(f"Loaded backbone: embed_dim={embed_dim}")
 
     # ── Pathology maps ──
@@ -332,10 +324,6 @@ def main():
     elif args.backbone == "sam":
         cache_fn = lambda m, ds, cd, dev: cache_sam_cls_features(
             m, sam_image_processor, ds, cd, device=dev
-        )
-    elif args.backbone == "sam2":
-        cache_fn = lambda m, ds, cd, dev: cache_sam2_cls_features(
-            m, sam2_processor, ds, cd, device=dev
         )
     else:
         cache_fn = lambda m, ds, cd, dev: cache_cls_features(

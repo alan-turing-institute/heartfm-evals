@@ -26,6 +26,7 @@ from heartfm_evals.features import (
     extract_dino_volume_features,
     extract_multilayer_features,
     extract_sam2_2d_features,
+    extract_sam_2d_features,
     extract_sam_volume_features,
 )
 
@@ -392,6 +393,65 @@ def cache_cinema_2d_features(
             label_2d = label_3d[0, :, :, z_idx]
 
             torch.save({"features": feats_2d, "label": label_2d.long()}, fpath)
+            manifest.append({"path": fpath, "pid": pid, "is_ed": is_ed, "z_idx": z_idx})
+
+    return manifest
+
+
+# ── 2D SAM v1 Slice Feature Caching ──────────────────────────────────────────
+def cache_sam_2d_features(
+    sam_model: nn.Module,
+    image_processor,
+    cinema_dataset,
+    cache_dir: Path,
+    layer_indices: tuple[int, ...],
+    device: torch.device | None = None,
+) -> list[dict]:
+    """Cache per-slice SAM v1 multi-layer ViT features for all slices in a dataset.
+
+    Args:
+        sam_model: Frozen SAM v1 model in eval mode.
+        image_processor: ``SamImageProcessor`` for pre-processing.
+        cinema_dataset: CineMA ``EndDiastoleEndSystoleDataset``.
+        cache_dir: Root cache directory; a ``layers_`` subdirectory is appended.
+        layer_indices: Which intermediate ViT layers to extract.
+        device: Device for inference.
+
+    Returns:
+        List of dicts with keys: ``path``, ``pid``, ``is_ed``, ``z_idx``.
+    """
+    layers_tag = "layers_" + "-".join(str(i) for i in sorted(layer_indices))
+    cache_dir = Path(cache_dir) / layers_tag
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    manifest: list[dict] = []
+
+    for sample_idx in tqdm(range(len(cinema_dataset)), desc="Caching SAM 2D features"):
+        sample = cinema_dataset[sample_idx]
+        image_3d = sample["sax_image"]  # (1, H, W, z)
+        label_3d = sample["sax_label"]  # (1, H, W, z)
+        n_slices = int(sample["n_slices"])
+        pid = sample["pid"]
+        is_ed = sample["is_ed"]
+        frame = "ed" if is_ed else "es"
+
+        for z_idx in range(n_slices):
+            fname = f"{pid}_{frame}_z{z_idx:02d}.pt"
+            fpath = cache_dir / fname
+
+            if fpath.exists():
+                manifest.append(
+                    {"path": fpath, "pid": pid, "is_ed": is_ed, "z_idx": z_idx}
+                )
+                continue
+
+            image_2d = image_3d[0, :, :, z_idx]  # (H, W)
+            label_2d = label_3d[0, :, :, z_idx]  # (H, W)
+
+            feats = extract_sam_2d_features(
+                sam_model, image_processor, image_2d, layer_indices, device
+            )
+
+            torch.save({"features": feats, "label": label_2d.long()}, fpath)
             manifest.append({"path": fpath, "pid": pid, "is_ed": is_ed, "z_idx": z_idx})
 
     return manifest

@@ -266,6 +266,56 @@ def extract_sam_volume_features(
     return features_dict, vol, n_slices
 
 
+# ── 2D SAM v1 Slice Feature Extraction ───────────────────────────────────────
+@torch.inference_mode()
+def extract_sam_2d_features(
+    sam_model: nn.Module,
+    processor,
+    image_2d: torch.Tensor,
+    layer_indices: tuple[int, ...],
+    device: torch.device | None = None,
+    grid_size: int = GRID_SIZE,
+) -> torch.Tensor:
+    """Extract multi-layer SAM v1 ViT features for a single 2D slice.
+
+    Args:
+        sam_model: Frozen ``SamModel`` in eval mode.
+        processor: ``SamImageProcessor`` for pre-processing.
+        image_2d: ``(H, W)`` tensor in [0, 1].
+        layer_indices: Which intermediate ViT layers to extract.
+        device: Device for inference.
+        grid_size: Downsample spatial dims to this size (default 12).
+
+    Returns:
+        ``(embed_dim * n_layers, grid_size, grid_size)`` tensor.
+    """
+    from PIL import Image
+
+    img_np = (image_2d.clamp(0, 1).cpu().numpy() * 255.0).astype(np.uint8)
+    pil = Image.fromarray(img_np, mode="L").convert("RGB")
+
+    proc = processor(images=pil, return_tensors="pt")
+    pixel_values = proc["pixel_values"]
+    if device is not None:
+        pixel_values = pixel_values.to(device)
+
+    enc_out = sam_model.vision_encoder(pixel_values, output_hidden_states=True)
+    hidden_states = (
+        enc_out.hidden_states
+    )  # tuple of (1, 64, 64, embed_dim) — channels-last
+
+    feats = []
+    for idx in layer_indices:
+        feat = hidden_states[idx]  # (1, 64, 64, embed_dim)
+        feat = feat.permute(0, 3, 1, 2)  # (1, embed_dim, 64, 64)
+        feat = F.interpolate(
+            feat, size=(grid_size, grid_size), mode="bilinear", align_corners=False
+        )
+        feats.append(feat.squeeze(0).cpu())  # (embed_dim, gs, gs)
+
+    return torch.cat(feats, dim=0)  # (embed_dim * n_layers, gs, gs)
+
+
 # ── 2D CineMA Slice Feature Extraction ────────────────────────────────────────
 @torch.inference_mode()
 def extract_cinema_2d_feature_volume(

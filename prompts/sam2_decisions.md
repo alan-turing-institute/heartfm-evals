@@ -351,3 +351,57 @@ All backbones use their true final output for classification. SAM2 uses Stage 4
 (`hidden_states[-1]`), which is the model's genuine last block — analogous to the CLS
 token in DINOv3/CineMA. The `cls_embed_dim` field (768/768/896/1152) records the Stage 4
 channel count used for this embedding.
+
+---
+
+## 9. SAM v1 vs SAM2 for segmentation — which belongs in the comparison
+
+### Report context
+
+The primary objective is to compare **backbone transferability** across CineMA, DINOv3,
+and SAM for cardiac MRI classification and segmentation. This makes the choice of SAM
+variant non-trivial.
+
+### Why SAM v1 is the right choice for segmentation
+
+DINOv3 and SAM v1 are both plain isotropic ViTs. The meaningful axis of variation between
+them is pretraining objective — self-supervised (DINOv3) vs task-supervised for
+segmentation (SAM v1). Same architecture, different training signal. CineMA is then the
+domain-specific baseline. Together the three backbones vary one thing at a time:
+
+| Backbone | Architecture | Pretraining | Domain |
+|----------|-------------|-------------|--------|
+| DINOv3 | Isotropic ViT | Self-supervised | Natural images |
+| SAM v1 | Isotropic ViT | Supervised (segmentation) | Natural images |
+| CineMA | Conv + ViT | Supervised | Cardiac MRI |
+
+This is a legible story for a transferability report. DINOv3 vs SAM v1 isolates
+pretraining objective; SAM v1 vs CineMA isolates domain specificity.
+
+### Why SAM2 muddies the segmentation comparison
+
+SAM2 is a different architecture class (Hiera, hierarchical ViT), so substituting it for
+SAM v1 conflates pretraining objective with architecture. More critically, SAM2's main
+advantage — genuine multi-scale spatial features from its Hiera stages — is neutralised
+by the `grid_size=12` caching step: all stage outputs are downsampled to 12×12 before
+saving, discarding the native spatial pyramid.
+
+The UNetR decoder then reconstructs a spatial hierarchy by upsampling from 12×12,
+regardless of which backbone was used. Only CineMA escapes this because its conv-encoder
+skips are cached at native resolution (48×48, 24×24).
+
+So SAM2 in the current segmentation pipeline:
+- Adds architectural complexity (per-stage channel tracking, updated decoders)
+- Does not benefit from its genuine multi-scale advantage (lost at caching)
+- Introduces a confound that makes the three-way comparison harder to interpret
+
+### Conclusion
+
+**Both tasks: use SAM v1.** It keeps the three-way comparison (CineMA, DINOv3, SAM)
+architecturally consistent and interpretable. For segmentation it fits the same UNetR
+framework as DINOv3 with no special treatment (uniform channels, simple `layer_indices`).
+For classification it uses the same pre-neck GAP approach as before.
+
+SAM2 classification and segmentation code has been removed from the pipeline. The SAM2
+segmentation scripts and multi-scale decoder changes remain in the codebase but are not
+part of the primary evaluation.
