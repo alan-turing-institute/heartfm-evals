@@ -180,11 +180,12 @@ def main() -> None:
 
     base_name = f"{model_name}_{args.decoder}"
     args.output_dir.mkdir(parents=True, exist_ok=True)
+    existing = sorted(args.output_dir.glob(f"{base_name}_*.json"))
+    if existing:
+        print(f"Skipping: results already exist at {existing[-1]}")
+        return
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     json_path = args.output_dir / f"{base_name}_{timestamp}.json"
-    if json_path.exists():
-        print(f"Skipping: {json_path} already exists.")
-        return
 
     print(f"Dataset: {args.dataset}")
     print(f"Device: {device}")
