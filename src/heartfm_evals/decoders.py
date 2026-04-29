@@ -37,21 +37,9 @@ class DenseLinearProbe(nn.Module):
         num_classes: int = NUM_CLASSES,
         layer_indices: tuple[int, ...] = (11,),
         cached_layers: tuple[int, ...] | None = None,
-        cached_embed_dims: tuple[int, ...] | None = None,
         output_size: tuple[int, int] = (IMAGE_SIZE, IMAGE_SIZE),
         dropout: float = 0.1,
     ):
-        """
-        Args:
-            embed_dim: Channel count of each *probed* layer (uniform across
-                ``layer_indices``).  For SAM2 linear probe this should be the
-                Stage-4 channel count (``cls_embed_dim``), not the Stage-3 one.
-            cached_embed_dims: Per-layer channel counts for *all* layers stored
-                in the cache (i.e. one value per entry in ``cached_layers``).
-                Required when the cache contains SAM2 multi-scale features where
-                different stages have different channel widths.  When ``None``,
-                ``embed_dim`` is assumed to be uniform across all cached layers.
-        """
         super().__init__()
         self.embed_dim = embed_dim
         self.layer_indices = layer_indices
@@ -60,21 +48,14 @@ class DenseLinearProbe(nn.Module):
         )
         self.output_size = output_size
 
-        # Build channel-selection indices when cache differs from probe layers.
-        # Supports non-uniform cached_embed_dims (e.g. SAM2 multi-scale).
         self._channel_indices: list[int] | None = None
         if self.cached_layers != self.layer_indices:
             cached_list = list(self.cached_layers)
             indices: list[int] = []
             for li in self.layer_indices:
                 pos = cached_list.index(li)
-                if cached_embed_dims is not None:
-                    start = sum(cached_embed_dims[:pos])
-                    width = cached_embed_dims[pos]
-                else:
-                    start = pos * embed_dim
-                    width = embed_dim
-                indices.extend(range(start, start + width))
+                start = pos * embed_dim
+                indices.extend(range(start, start + embed_dim))
             self._channel_indices = indices
 
         in_channels = embed_dim * len(layer_indices)
@@ -162,7 +143,6 @@ class DINOv3UNetRDecoder(nn.Module):
     def __init__(
         self,
         embed_dim: int = 384,
-        embed_dims: tuple[int, ...] | None = None,
         layer_indices: tuple[int, ...] = (3, 6, 9, 11),
         dec_chans: tuple[int, ...] = (32, 64, 128, 256, 512),
         dec_patch_size: tuple[int, int, int] = (2, 2, 1),
@@ -171,44 +151,28 @@ class DINOv3UNetRDecoder(nn.Module):
         norm: str = "instance",
         dropout: float = 0.1,
     ):
-        """
-        Args:
-            embed_dim: Uniform channel count across all layers (DINOv3 / SAM v1).
-                Ignored when ``embed_dims`` is provided.
-            embed_dims: Per-layer channel counts, one per entry in
-                ``layer_indices`` (Stage 1, Stage 2, Stage 3 end, Stage 4 end).
-                Use this for SAM2 multi-scale features where each stage has a
-                different channel width.  When ``None``, ``embed_dim`` is
-                broadcast to all four layers.
-        """
         super().__init__()
         if len(layer_indices) != 4:
             msg = f"Expected 4 layer_indices, got {len(layer_indices)}"
             raise ValueError(msg)
         self.layer_indices = layer_indices
 
-        # Resolve per-layer channel counts
-        _dims: tuple[int, ...] = (
-            embed_dims if embed_dims is not None else (embed_dim,) * 4
-        )
-
         # Image path: raw image → shallowest skip
         self.image_conv = ConvResBlock(
             n_dims=3, in_chans=1, out_chans=dec_chans[0], norm=norm
         )
 
-        # Skip adapters: backbone features → decoder skip channels.
-        # Each adapter uses the channel count for its respective stage.
+        # Skip adapters: backbone features → decoder skip channels
         self.skip_adapters = nn.ModuleDict(
             {
                 f"layer_{layer_indices[0]}": ConvResBlock(
-                    n_dims=3, in_chans=_dims[0], out_chans=dec_chans[1], norm=norm
+                    n_dims=3, in_chans=embed_dim, out_chans=dec_chans[1], norm=norm
                 ),
                 f"layer_{layer_indices[1]}": ConvResBlock(
-                    n_dims=3, in_chans=_dims[1], out_chans=dec_chans[2], norm=norm
+                    n_dims=3, in_chans=embed_dim, out_chans=dec_chans[2], norm=norm
                 ),
                 f"layer_{layer_indices[2]}": ConvResBlock(
-                    n_dims=3, in_chans=_dims[2], out_chans=dec_chans[3], norm=norm
+                    n_dims=3, in_chans=embed_dim, out_chans=dec_chans[3], norm=norm
                 ),
             }
         )
@@ -220,7 +184,7 @@ class DINOv3UNetRDecoder(nn.Module):
 
         # Bottleneck: deepest layer → adapt channels → downsample spatially
         self.bottleneck_adapter = ConvResBlock(
-            n_dims=3, in_chans=_dims[3], out_chans=dec_chans[-1], norm=norm
+            n_dims=3, in_chans=embed_dim, out_chans=dec_chans[-1], norm=norm
         )
         self.bottleneck_down = nn.Conv3d(
             dec_chans[-1],
@@ -252,8 +216,6 @@ class DINOv3UNetRDecoder(nn.Module):
         Returns:
             logits: (B, num_classes, H, W, Z)
         """
-        import torch
-
         image = batch["image"]  # (B, 1, H, W, Z)
 
         # Shallowest skip: image → conv
@@ -406,8 +368,6 @@ class CineMAUNetRDecoder(nn.Module):
         Returns:
             logits: (B, num_classes, H, W, Z)
         """
-        import torch
-
         image = batch["image"]
         vit_feat = batch["vit_features"]
 
@@ -448,28 +408,18 @@ def get_decoder(
     num_classes: int = NUM_CLASSES,
     layer_indices: tuple[int, ...] = (3, 6, 9, 11),
     cached_layers: tuple[int, ...] | None = None,
-    embed_dims: tuple[int, ...] | None = None,
-    cached_embed_dims: tuple[int, ...] | None = None,
     **kwargs,
 ) -> nn.Module:
     """Instantiate a segmentation decoder by name.
 
     Args:
         decoder_type: One of ``"linear_probe"``, ``"conv_decoder"``, ``"unetr"``.
-        backbone_type: One of ``"dinov3"``, ``"cinema"``, ``"sam2"``.
-        embed_dim: Backbone embedding dimension (uniform across layers).
-            For SAM2 linear probe, pass the channel count of the *probed* layer
-            (i.e. ``cls_embed_dim``, Stage 4 channels).
+        backbone_type: One of ``"dinov3"``, ``"cinema"``, ``"sam"``.
+        embed_dim: Backbone embedding dimension.
         num_classes: Number of segmentation classes.
         layer_indices: Layer indices used for feature extraction.
         cached_layers: Layer indices present in the feature cache (may differ
             from ``layer_indices`` for linear_probe layer subset selection).
-        embed_dims: Per-layer channel counts, one per ``layer_indices`` entry.
-            Used for SAM2 multi-scale features (``conv_decoder`` and ``unetr``).
-            When provided, overrides ``embed_dim`` for per-layer adapter sizing.
-        cached_embed_dims: Per-layer channel counts for all layers in the cache,
-            one per ``cached_layers`` entry.  Used by ``linear_probe`` channel
-            selection when the cache contains SAM2 multi-scale features.
         **kwargs: Additional keyword arguments passed to the decoder constructor.
 
     Returns:
@@ -481,16 +431,11 @@ def get_decoder(
             num_classes=num_classes,
             layer_indices=layer_indices,
             cached_layers=cached_layers,
-            cached_embed_dims=cached_embed_dims,
             **kwargs,
         )
     elif decoder_type == "conv_decoder":
-        if embed_dims is not None:
-            in_channels = sum(embed_dims)
-        else:
-            in_channels = embed_dim * len(layer_indices)
         return ConvDecoderProbe(
-            in_channels=in_channels,
+            in_channels=embed_dim * len(layer_indices),
             num_classes=num_classes,
             **kwargs,
         )
@@ -502,10 +447,9 @@ def get_decoder(
                 **kwargs,
             )
         else:
-            # DINOv3, SAM2, SAM all use DINOv3UNetRDecoder
+            # DINOv3 and SAM both use DINOv3UNetRDecoder
             return DINOv3UNetRDecoder(
                 embed_dim=embed_dim,
-                embed_dims=embed_dims,
                 layer_indices=layer_indices,
                 num_classes=num_classes,
                 **kwargs,

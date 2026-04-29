@@ -1,7 +1,7 @@
 """Feature extraction utilities for frozen backbone models.
 
 Provides preprocessing and feature extraction functions for:
-- 2D spatial features (DINOv3 multi-layer, SAM2 Hiera)
+- 2D spatial features (DINOv3 multi-layer, SAM v1)
 - 3D volume features (DINOv3, CineMA, SAM v1)
 
 All functions operate on frozen backbones and return CPU tensors.
@@ -355,62 +355,3 @@ def extract_cinema_2d_feature_volume(
         tokens.reshape(b, gx, gy, gz, c).permute(0, 4, 1, 2, 3).contiguous()
     )  # (1, C, gx, gy, gz)
     return feat_vol.squeeze(0).cpu(), n_slices
-
-
-# ── 2D SAM2 Slice Feature Extraction ──────────────────────────────────────────
-@torch.inference_mode()
-def extract_sam2_2d_features(
-    sam2_model: nn.Module,
-    image_processor,
-    image_2d: torch.Tensor,
-    layer_indices: tuple[int, ...],
-    device: torch.device | None = None,
-    grid_size: int = GRID_SIZE,
-) -> torch.Tensor:
-    """Extract multi-layer SAM2 Hiera features for a single 2D slice.
-
-    Uses ``output_hidden_states=True`` to extract intermediate Hiera block
-    outputs at the specified layer indices, then downsamples each to
-    *grid_size* × *grid_size* and concatenates along the channel dimension.
-    This mirrors ``extract_sam_volume_features`` for the 2D case.
-
-    When ``layer_indices`` spans multiple Hiera stages (as in the multi-scale
-    segmentation config), each stage has a different channel count.  The
-    returned tensor has total channels equal to the *sum* of per-stage channel
-    counts — not ``embed_dim * n_layers``.
-
-    Args:
-        sam2_model: Frozen SAM2 model in eval mode.
-        image_processor: SAM2 processor for image pre-processing.
-        image_2d: (H, W) tensor in [0, 1].
-        layer_indices: Which intermediate Hiera block outputs to extract.
-        device: Device for inference.
-        grid_size: Spatial size to downsample each feature map to.
-
-    Returns:
-        Feature tensor ``(sum(C_i), grid_size, grid_size)`` where ``C_i`` is
-        the channel count at ``layer_indices[i]``.  For uniform-channel
-        backbones this simplifies to ``(embed_dim * n_layers, grid_size,
-        grid_size)``.
-    """
-    img_np = (image_2d.clamp(0, 1).cpu().numpy() * 255.0).astype(np.uint8)
-    pil = Image.fromarray(img_np, mode="L").convert("RGB")
-
-    proc = image_processor(images=pil, return_tensors="pt")
-    pixel_values = proc["pixel_values"]
-    if device is not None:
-        pixel_values = pixel_values.to(device)
-
-    enc_out = sam2_model.vision_encoder(pixel_values, output_hidden_states=True)
-    hidden_states = enc_out.hidden_states  # tuple of (1, H', W', C) — channels-last
-
-    feats = []
-    for idx in layer_indices:
-        feat = hidden_states[idx]  # (1, H', W', C)
-        feat = feat.permute(0, 3, 1, 2)  # (1, C, H', W')
-        feat = F.interpolate(
-            feat, size=(grid_size, grid_size), mode="bilinear", align_corners=False
-        )
-        feats.append(feat.squeeze(0).cpu())  # (C, grid_size, grid_size)
-
-    return torch.cat(feats, dim=0)  # (C * n_layers, grid_size, grid_size)

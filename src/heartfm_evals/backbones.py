@@ -8,8 +8,7 @@ Supported backbone types:
 
 * ``"dinov3"`` – DINOv3 ViT loaded via local ``torch.hub``.
 * ``"cinema"`` – CineMA 3-D cardiac ViT from HuggingFace.
-* ``"sam"``   – SAM v1 (used for classification).
-* ``"sam2"``  – SAM 2.1 Hiera (used for segmentation).
+* ``"sam"``   – SAM v1.
 """
 
 from __future__ import annotations
@@ -42,49 +41,6 @@ DINOV3_CONFIGS: dict[str, dict[str, Any]] = {
     },
 }
 
-# ── SAM 2.1 Hiera configs ────────────────────────────────────────────────────
-# hidden_states from transformers includes the initial patch embedding as
-# index 0, so hidden_states[i+1] is the output of block i.
-#
-# embed_dim:       Stage 3 channel count — kept for backward compatibility.
-# cls_embed_dim:   Stage 4 channel count — used for classification (GAP of final block).
-# layer_indices:   One representative block per stage (Stage 1–4), giving
-#                  truly multi-scale features for segmentation.
-# stage_embed_dims: Channel counts at each of the 4 layer_indices
-#                   (Stage 1, Stage 2, Stage 3 end, Stage 4 end).
-#
-# Stage layout (block counts verified empirically):
-#   tiny       12 total: Stage1=[1](256×256,C=96) Stage2=[2–3](128×128,C=192)
-#                        Stage3=[4–10](64×64,C=384) Stage4=[11–12](32×32,C=768)
-#   small      16 total: Stage1=[1](256×256,C=96) Stage2=[2–3](128×128,C=192)
-#                        Stage3=[4–14](64×64,C=384) Stage4=[15–16](32×32,C=768)
-#   base-plus  24 total: Stage1=[1–2](256×256,C=112) Stage2=[3–5](128×128,C=224)
-#                        Stage3=[6–21](64×64,C=448) Stage4=[22–24](32×32,C=896)
-#   large      48 total: Stage1=[1–2](256×256,C=144) Stage2=[3–8](128×128,C=288)
-#                        Stage3=[9–44](64×64,C=576) Stage4=[45–48](32×32,C=1152)
-SAM2_CONFIGS: dict[str, dict[str, Any]] = {
-    "facebook/sam2.1-hiera-tiny": {
-        "embed_dim": 384,
-        "layer_indices": (1, 3, 10, 12),
-        "stage_embed_dims": (96, 192, 384, 768),
-    },
-    "facebook/sam2.1-hiera-small": {
-        "embed_dim": 384,
-        "layer_indices": (1, 3, 14, 16),
-        "stage_embed_dims": (96, 192, 384, 768),
-    },
-    "facebook/sam2.1-hiera-base-plus": {
-        "embed_dim": 448,
-        "layer_indices": (2, 5, 21, 24),
-        "stage_embed_dims": (112, 224, 448, 896),
-    },
-    "facebook/sam2.1-hiera-large": {
-        "embed_dim": 576,
-        "layer_indices": (2, 8, 44, 48),
-        "stage_embed_dims": (144, 288, 576, 1152),
-    },
-}
-
 
 # ── Public helpers ─────────────────────────────────────────────────────────────
 
@@ -107,8 +63,6 @@ def load_backbone(
     dinov3_weights_path: str | None = None,
     # SAM v1 options
     sam_model_id: str = "facebook/sam-vit-base",
-    # SAM2 options
-    sam2_model_id: str = "facebook/sam2.1-hiera-base-plus",
     # Shared HuggingFace options
     hf_cache_dir: str | Path = "model_weights/hf",
     auto_download: bool = True,
@@ -118,7 +72,7 @@ def load_backbone(
     Parameters
     ----------
     backbone_type:
-        One of ``"dinov3"``, ``"cinema"``, ``"sam"``, ``"sam2"``.
+        One of ``"dinov3"``, ``"cinema"``, ``"sam"``.
     device:
         Target device for the model.
 
@@ -142,8 +96,6 @@ def load_backbone(
         return _load_cinema(hf_cache_dir, auto_download, device)
     if backbone_type == "sam":
         return _load_sam(sam_model_id, hf_cache_dir, auto_download, device)
-    if backbone_type == "sam2":
-        return _load_sam2(sam2_model_id, hf_cache_dir, auto_download, device)
 
     msg = f"Unknown backbone_type: {backbone_type!r}"
     raise ValueError(msg)
@@ -232,34 +184,4 @@ def _load_sam(
         "embed_dim": embed_dim,
         "layer_indices": (2, 5, 8, 11),
         "sam_image_processor": processor,
-    }
-
-
-def _load_sam2(
-    model_id: str, hf_cache_dir: Path, auto_download: bool, device: torch.device
-) -> tuple[nn.Module, dict[str, Any]]:
-    from transformers import Sam2Model, Sam2Processor
-
-    cfg = SAM2_CONFIGS[model_id]
-
-    processor = Sam2Processor.from_pretrained(
-        model_id,
-        cache_dir=str(hf_cache_dir),
-        local_files_only=not auto_download,
-    )
-    backbone = Sam2Model.from_pretrained(
-        model_id,
-        cache_dir=str(hf_cache_dir),
-        local_files_only=not auto_download,
-    )
-    _freeze(backbone).to(device)
-
-    return backbone, {
-        "backbone_type": "sam2",
-        "model_name": model_id.split("/")[-1].replace(".", "_").replace("-", "_"),
-        "embed_dim": cfg["embed_dim"],
-        "cls_embed_dim": cfg["cls_embed_dim"],
-        "layer_indices": cfg["layer_indices"],
-        "stage_embed_dims": cfg["stage_embed_dims"],
-        "sam2_processor": processor,
     }
