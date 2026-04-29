@@ -1,6 +1,6 @@
 """Logistic-regression classification probe for patient-level pathology prediction.
 
-Supports four frozen backbones with a shared downstream protocol:
+Supports three frozen backbones with a shared downstream protocol:
 
     1. **DINOv3**: extract CLS token or GAP of patch tokens per 2D slice →
        one ``(embed_dim,)`` embedding per slice.
@@ -10,10 +10,8 @@ Supports four frozen backbones with a shared downstream protocol:
     3. **SAM**: run ``get_image_embeddings()`` on each 2D slice (converted to
        RGB via ``SamImageProcessor``), global-average-pool the spatial feature
        map ``(C, h, w)`` → one ``(C,)`` embedding per slice (no CLS token).
-    4. **SAM2**: run the Hiera vision encoder on each 2D slice, global-average-
-       pool the last-stage hidden state → one ``(embed_dim,)`` embedding per slice.
 
-DINOv3, SAM, and SAM2 produce one embedding per 2D slice; CineMA produces one
+DINOv3 and SAM produce one embedding per 2D slice; CineMA produces one
 embedding per 3D volume.  Patient-level features are built identically:
 mean-pool ED embeddings, mean-pool ES embeddings, concatenate →
 ``(2 × embed_dim,)`` vector → sklearn LogisticRegression with L2 penalty

@@ -31,10 +31,10 @@ for dataset in "${DATASETS[@]}"; do
         run --dataset "$dataset" --backbone cinema --decoder "$decoder"
     done
 
-    # ── SAM2 ──
-    for model_id in facebook/sam2.1-hiera-tiny facebook/sam2.1-hiera-small facebook/sam2.1-hiera-base-plus facebook/sam2.1-hiera-large; do
+    # ── SAM v1 ──
+    for model_id in facebook/sam-vit-base facebook/sam-vit-large facebook/sam-vit-huge; do
         for decoder in "${DECODERS[@]}"; do
-            run --dataset "$dataset" --backbone sam2 --sam2-model-id "$model_id" --decoder "$decoder"
+            run --dataset "$dataset" --backbone sam --sam-model-id "$model_id" --decoder "$decoder"
         done
     done
 done

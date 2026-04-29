@@ -2,14 +2,14 @@
 """Unified segmentation evaluation script.
 
 Supports all backbone × decoder × dataset combinations:
-    --backbone {dinov3,cinema,sam2}
+    --backbone {dinov3,cinema,sam}
     --decoder  {linear_probe,conv_decoder,unetr}
     --dataset  {acdc,mnm,mnm2}
 
 Usage examples:
     python scripts/segmentation/run_segmentation.py --backbone dinov3 --decoder linear_probe --dataset acdc
     python scripts/segmentation/run_segmentation.py --backbone cinema --decoder unetr --dataset mnm
-    python scripts/segmentation/run_segmentation.py --backbone sam2 --decoder conv_decoder --dataset mnm2 --sam2-model-id facebook/sam2.1-hiera-tiny
+    python scripts/segmentation/run_segmentation.py --backbone sam --decoder conv_decoder --dataset mnm2 --sam-model-id facebook/sam-vit-large
 """
 
 from __future__ import annotations
@@ -32,7 +32,6 @@ from heartfm_evals.caching import (
     cache_cinema_volume_features,
     cache_dino_volume_features,
     cache_features,
-    cache_sam2_2d_features,
     cache_sam_2d_features,
     cache_sam_volume_features,
 )
@@ -54,9 +53,7 @@ from heartfm_evals.training import (
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Unified segmentation evaluation")
-    p.add_argument(
-        "--backbone", required=True, choices=["dinov3", "cinema", "sam", "sam2"]
-    )
+    p.add_argument("--backbone", required=True, choices=["dinov3", "cinema", "sam"])
     p.add_argument(
         "--decoder", required=True, choices=["linear_probe", "conv_decoder", "unetr"]
     )
@@ -70,7 +67,6 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--dinov3-repo-dir", default="models/dinov3/")
     p.add_argument("--dinov3-weights-path", default=None)
     p.add_argument("--sam-model-id", default="facebook/sam-vit-base")
-    p.add_argument("--sam2-model-id", default="facebook/sam2.1-hiera-base-plus")
     p.add_argument("--hf-cache-dir", type=Path, default=Path("model_weights/hf"))
 
     # Layer selection
@@ -111,8 +107,6 @@ def derive_model_name(args: argparse.Namespace) -> str:
         return "cinema_pretrained"
     if args.backbone == "sam":
         return args.sam_model_id.split("/")[-1].replace("-", "_")
-    if args.backbone == "sam2":
-        return args.sam2_model_id.split("/")[-1].replace("-", "_").replace(".", "_")
     return args.dinov3_model_name
 
 
@@ -211,10 +205,6 @@ def main() -> None:
         backbone_kwargs["sam_model_id"] = args.sam_model_id
         backbone_kwargs["hf_cache_dir"] = str(args.hf_cache_dir)
         backbone_kwargs["auto_download"] = not args.no_auto_download
-    elif args.backbone == "sam2":
-        backbone_kwargs["sam2_model_id"] = args.sam2_model_id
-        backbone_kwargs["hf_cache_dir"] = str(args.hf_cache_dir)
-        backbone_kwargs["auto_download"] = not args.no_auto_download
     elif args.backbone == "cinema":
         backbone_kwargs["hf_cache_dir"] = str(args.hf_cache_dir)
         backbone_kwargs["auto_download"] = not args.no_auto_download
@@ -222,9 +212,6 @@ def main() -> None:
     backbone, config = load_backbone(args.backbone, device, **backbone_kwargs)
     embed_dim = config["embed_dim"]
     layer_indices = tuple(config.get("layer_indices", (3, 6, 9, 11)))
-    # SAM2 only: per-stage channel counts for the 4 layer_indices.
-    # None for DINOv3 and CineMA (uniform embed_dim).
-    stage_embed_dims: tuple[int, ...] | None = config.get("stage_embed_dims")
 
     # Determine which layers to use for probe
     if args.use_layers is not None:
@@ -252,7 +239,7 @@ def main() -> None:
     print(f"Train: {len(train_ds)}, Val: {len(val_ds)}, Test: {len(test_ds)}")
 
     # ── Cache features ──
-    sam_processor = config.get("sam_image_processor") or config.get("sam2_processor")
+    sam_processor = config.get("sam_image_processor")
 
     if is_volume:
         # 3D volume caching
@@ -276,7 +263,7 @@ def main() -> None:
             test_manifest = cache_cinema_volume_features(
                 backbone, test_ds, cache_dir / "test", device
             )
-        else:  # sam or sam2
+        else:  # sam
             train_manifest = cache_sam_volume_features(
                 backbone,
                 sam_processor,
@@ -348,31 +335,6 @@ def main() -> None:
                 layer_indices,
                 device,
             )
-        else:  # sam2
-            train_manifest = cache_sam2_2d_features(
-                backbone,
-                sam_processor,
-                train_ds,
-                cache_dir / "train",
-                layer_indices,
-                device,
-            )
-            val_manifest = cache_sam2_2d_features(
-                backbone,
-                sam_processor,
-                val_ds,
-                cache_dir / "val",
-                layer_indices,
-                device,
-            )
-            test_manifest = cache_sam2_2d_features(
-                backbone,
-                sam_processor,
-                test_ds,
-                cache_dir / "test",
-                layer_indices,
-                device,
-            )
 
     print(
         f"Cached: train={len(train_manifest)}, val={len(val_manifest)}, "
@@ -417,28 +379,6 @@ def main() -> None:
     # ── Build decoder ──
     decoder_kwargs: dict = {}
 
-    # For SAM2 multi-scale, each Hiera stage has a different channel count.
-    # Determine per-layer dims and the effective embed_dim for the decoder.
-    #
-    # linear_probe  — probes only the last layer (Stage 4).  embed_dim must be
-    #                 Stage-4 channels; cached_embed_dims enables correct channel
-    #                 selection from the multi-scale concatenated cache tensor.
-    # conv_decoder  — takes the full concatenated tensor; in_channels computed
-    #                 from sum(embed_dims) inside get_decoder.
-    # unetr         — each skip adapter gets its own in_chans from embed_dims.
-    if stage_embed_dims is not None:
-        # Stage 4 channels = what the linear probe actually operates on
-        decoder_embed_dim = (
-            stage_embed_dims[-1] if args.decoder == "linear_probe" else embed_dim
-        )
-        # embed_dims used by conv_decoder / unetr (not linear_probe — it uses embed_dim per layer)
-        decoder_embed_dims = (
-            stage_embed_dims if args.decoder != "linear_probe" else None
-        )
-    else:
-        decoder_embed_dim = embed_dim
-        decoder_embed_dims = None
-
     if args.decoder == "linear_probe":
         decoder_kwargs["dropout"] = args.dropout
         # Only set cached_layers when cache has more layers than the probe uses.
@@ -447,15 +387,12 @@ def main() -> None:
             args.backbone == "cinema" and not is_volume
         ):
             decoder_kwargs["cached_layers"] = layer_indices
-            if stage_embed_dims is not None:
-                decoder_kwargs["cached_embed_dims"] = stage_embed_dims
 
     decoder = get_decoder(
         decoder_type=args.decoder,
         backbone_type=args.backbone,
-        embed_dim=decoder_embed_dim,
+        embed_dim=embed_dim,
         layer_indices=use_layers,
-        embed_dims=decoder_embed_dims,
         **decoder_kwargs,
     ).to(device)
 
