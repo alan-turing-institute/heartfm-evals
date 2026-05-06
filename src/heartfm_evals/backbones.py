@@ -8,8 +8,7 @@ Supported backbone types:
 
 * ``"dinov3"`` – DINOv3 ViT loaded via local ``torch.hub``.
 * ``"cinema"`` – CineMA 3-D cardiac ViT from HuggingFace.
-* ``"sam"``   – SAM v1 (used for classification).
-* ``"sam2"``  – SAM 2.1 Hiera (used for segmentation).
+* ``"sam"``   – SAM v1.
 """
 
 from __future__ import annotations
@@ -42,29 +41,6 @@ DINOV3_CONFIGS: dict[str, dict[str, Any]] = {
     },
 }
 
-# ── SAM 2.1 Hiera configs ────────────────────────────────────────────────────
-# hidden_states from transformers includes the initial patch embedding as
-# index 0, so hidden_states[i+1] is the output of block i.  Stage-2 block
-# ranges are shifted +1 vs raw block numbers.
-SAM2_CONFIGS: dict[str, dict[str, Any]] = {
-    "facebook/sam2.1-hiera-tiny": {
-        "embed_dim": 384,
-        "layer_indices": (4, 6, 8, 10),
-    },
-    "facebook/sam2.1-hiera-small": {
-        "embed_dim": 384,
-        "layer_indices": (4, 7, 11, 14),
-    },
-    "facebook/sam2.1-hiera-base-plus": {
-        "embed_dim": 448,
-        "layer_indices": (6, 11, 16, 21),
-    },
-    "facebook/sam2.1-hiera-large": {
-        "embed_dim": 576,
-        "layer_indices": (9, 21, 33, 44),
-    },
-}
-
 
 # ── Public helpers ─────────────────────────────────────────────────────────────
 
@@ -87,8 +63,6 @@ def load_backbone(
     dinov3_weights_path: str | None = None,
     # SAM v1 options
     sam_model_id: str = "facebook/sam-vit-base",
-    # SAM2 options
-    sam2_model_id: str = "facebook/sam2.1-hiera-base-plus",
     # Shared HuggingFace options
     hf_cache_dir: str | Path = "model_weights/hf",
     auto_download: bool = True,
@@ -98,7 +72,7 @@ def load_backbone(
     Parameters
     ----------
     backbone_type:
-        One of ``"dinov3"``, ``"cinema"``, ``"sam"``, ``"sam2"``.
+        One of ``"dinov3"``, ``"cinema"``, ``"sam"``.
     device:
         Target device for the model.
 
@@ -122,8 +96,6 @@ def load_backbone(
         return _load_cinema(hf_cache_dir, auto_download, device)
     if backbone_type == "sam":
         return _load_sam(sam_model_id, hf_cache_dir, auto_download, device)
-    if backbone_type == "sam2":
-        return _load_sam2(sam2_model_id, hf_cache_dir, auto_download, device)
 
     msg = f"Unknown backbone_type: {backbone_type!r}"
     raise ValueError(msg)
@@ -210,33 +182,6 @@ def _load_sam(
         "backbone_type": "sam",
         "model_name": model_id.split("/")[-1].replace("-", "_"),
         "embed_dim": embed_dim,
+        "layer_indices": (2, 5, 8, 11),
         "sam_image_processor": processor,
-    }
-
-
-def _load_sam2(
-    model_id: str, hf_cache_dir: Path, auto_download: bool, device: torch.device
-) -> tuple[nn.Module, dict[str, Any]]:
-    from transformers import Sam2Model, Sam2Processor
-
-    cfg = SAM2_CONFIGS[model_id]
-
-    processor = Sam2Processor.from_pretrained(
-        model_id,
-        cache_dir=str(hf_cache_dir),
-        local_files_only=not auto_download,
-    )
-    backbone = Sam2Model.from_pretrained(
-        model_id,
-        cache_dir=str(hf_cache_dir),
-        local_files_only=not auto_download,
-    )
-    _freeze(backbone).to(device)
-
-    return backbone, {
-        "backbone_type": "sam2",
-        "model_name": model_id.split("/")[-1].replace(".", "_"),
-        "embed_dim": cfg["embed_dim"],
-        "layer_indices": cfg["layer_indices"],
-        "sam2_processor": processor,
     }

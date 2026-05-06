@@ -2,14 +2,14 @@
 """Unified segmentation evaluation script.
 
 Supports all backbone × decoder × dataset combinations:
-    --backbone {dinov3,cinema,sam2}
+    --backbone {dinov3,cinema,sam}
     --decoder  {linear_probe,conv_decoder,unetr}
     --dataset  {acdc,mnm,mnm2}
 
 Usage examples:
     python scripts/segmentation/run_segmentation.py --backbone dinov3 --decoder linear_probe --dataset acdc
     python scripts/segmentation/run_segmentation.py --backbone cinema --decoder unetr --dataset mnm
-    python scripts/segmentation/run_segmentation.py --backbone sam2 --decoder conv_decoder --dataset mnm2 --sam2-model-id facebook/sam2.1-hiera-tiny
+    python scripts/segmentation/run_segmentation.py --backbone sam --decoder conv_decoder --dataset mnm2 --sam-model-id facebook/sam-vit-large
 """
 
 from __future__ import annotations
@@ -32,7 +32,7 @@ from heartfm_evals.caching import (
     cache_cinema_volume_features,
     cache_dino_volume_features,
     cache_features,
-    cache_sam2_2d_features,
+    cache_sam_2d_features,
     cache_sam_volume_features,
 )
 from heartfm_evals.constants import CLASS_NAMES, NUM_CLASSES
@@ -40,7 +40,6 @@ from heartfm_evals.data import load_segmentation_datasets
 from heartfm_evals.decoders import get_decoder
 from heartfm_evals.device import detect_device
 from heartfm_evals.losses import CombinedLoss, MaskedVolumeLoss, WeightedCombinedLoss
-from heartfm_evals.reproducibility import set_seed
 from heartfm_evals.training import (
     evaluate,
     evaluate_per_sample,
@@ -54,7 +53,7 @@ from heartfm_evals.training import (
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Unified segmentation evaluation")
-    p.add_argument("--backbone", required=True, choices=["dinov3", "cinema", "sam2"])
+    p.add_argument("--backbone", required=True, choices=["dinov3", "cinema", "sam"])
     p.add_argument(
         "--decoder", required=True, choices=["linear_probe", "conv_decoder", "unetr"]
     )
@@ -67,7 +66,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--dinov3-model-name", default="dinov3_vits16")
     p.add_argument("--dinov3-repo-dir", default="models/dinov3/")
     p.add_argument("--dinov3-weights-path", default=None)
-    p.add_argument("--sam2-model-id", default="facebook/sam2.1-hiera-base-plus")
+    p.add_argument("--sam-model-id", default="facebook/sam-vit-base")
     p.add_argument("--hf-cache-dir", type=Path, default=Path("model_weights/hf"))
 
     # Layer selection
@@ -106,8 +105,8 @@ def parse_args() -> argparse.Namespace:
 def derive_model_name(args: argparse.Namespace) -> str:
     if args.backbone == "cinema":
         return "cinema_pretrained"
-    if args.backbone == "sam2":
-        return args.sam2_model_id.split("/")[-1].replace("-", "_").replace(".", "_")
+    if args.backbone == "sam":
+        return args.sam_model_id.split("/")[-1].replace("-", "_")
     return args.dinov3_model_name
 
 
@@ -181,11 +180,12 @@ def main() -> None:
 
     base_name = f"{model_name}_{args.decoder}"
     args.output_dir.mkdir(parents=True, exist_ok=True)
+    existing = sorted(args.output_dir.glob(f"{base_name}_*.json"))
+    if existing:
+        print(f"Skipping: results already exist at {existing[-1]}")
+        return
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     json_path = args.output_dir / f"{base_name}_{timestamp}.json"
-    if json_path.exists():
-        print(f"Skipping: {json_path} already exists.")
-        return
 
     print(f"Dataset: {args.dataset}")
     print(f"Device: {device}")
@@ -202,8 +202,8 @@ def main() -> None:
         backbone_kwargs["dinov3_repo_dir"] = args.dinov3_repo_dir
         if args.dinov3_weights_path:
             backbone_kwargs["dinov3_weights_path"] = args.dinov3_weights_path
-    elif args.backbone == "sam2":
-        backbone_kwargs["sam2_model_id"] = args.sam2_model_id
+    elif args.backbone == "sam":
+        backbone_kwargs["sam_model_id"] = args.sam_model_id
         backbone_kwargs["hf_cache_dir"] = str(args.hf_cache_dir)
         backbone_kwargs["auto_download"] = not args.no_auto_download
     elif args.backbone == "cinema":
@@ -240,7 +240,7 @@ def main() -> None:
     print(f"Train: {len(train_ds)}, Val: {len(val_ds)}, Test: {len(test_ds)}")
 
     # ── Cache features ──
-    sam_processor = config.get("sam2_processor")
+    sam_processor = config.get("sam_image_processor")
 
     if is_volume:
         # 3D volume caching
@@ -264,7 +264,7 @@ def main() -> None:
             test_manifest = cache_cinema_volume_features(
                 backbone, test_ds, cache_dir / "test", device
             )
-        else:  # sam2
+        else:  # sam
             train_manifest = cache_sam_volume_features(
                 backbone,
                 sam_processor,
@@ -311,15 +311,30 @@ def main() -> None:
             test_manifest = cache_cinema_2d_features(
                 backbone, test_ds, cache_dir / "test", device
             )
-        else:  # sam2
-            train_manifest = cache_sam2_2d_features(
-                backbone, sam_processor, train_ds, cache_dir / "train", layer_indices, device
+        elif args.backbone == "sam":
+            train_manifest = cache_sam_2d_features(
+                backbone,
+                sam_processor,
+                train_ds,
+                cache_dir / "train",
+                layer_indices,
+                device,
             )
-            val_manifest = cache_sam2_2d_features(
-                backbone, sam_processor, val_ds, cache_dir / "val", layer_indices, device
+            val_manifest = cache_sam_2d_features(
+                backbone,
+                sam_processor,
+                val_ds,
+                cache_dir / "val",
+                layer_indices,
+                device,
             )
-            test_manifest = cache_sam2_2d_features(
-                backbone, sam_processor, test_ds, cache_dir / "test", layer_indices, device
+            test_manifest = cache_sam_2d_features(
+                backbone,
+                sam_processor,
+                test_ds,
+                cache_dir / "test",
+                layer_indices,
+                device,
             )
 
     print(
@@ -364,6 +379,7 @@ def main() -> None:
 
     # ── Build decoder ──
     decoder_kwargs: dict = {}
+
     if args.decoder == "linear_probe":
         decoder_kwargs["dropout"] = args.dropout
         # Only set cached_layers when cache has more layers than the probe uses.
@@ -372,6 +388,7 @@ def main() -> None:
             args.backbone == "cinema" and not is_volume
         ):
             decoder_kwargs["cached_layers"] = layer_indices
+
     decoder = get_decoder(
         decoder_type=args.decoder,
         backbone_type=args.backbone,

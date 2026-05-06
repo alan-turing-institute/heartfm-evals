@@ -593,6 +593,8 @@ def sweep_C_and_train(
 
     use_val_split = val_features is not None and val_labels is not None
     if use_val_split:
+        assert val_features is not None
+        assert val_labels is not None
         X_val = val_features.numpy()
         y_val = val_labels.numpy()
     else:

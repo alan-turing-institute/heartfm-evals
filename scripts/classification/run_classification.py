@@ -45,7 +45,6 @@ from heartfm_evals.finetune_classification import (
     ClassificationHeadPredictor,
     finetune_sweep_and_train,
 )
-from heartfm_evals.reproducibility import set_seed
 
 
 def parse_args() -> argparse.Namespace:
@@ -90,7 +89,9 @@ def parse_args() -> argparse.Namespace:
     p.add_argument(
         "--no-auto-download", action="store_true", help="Disable HF auto-download"
     )
-    p.add_argument("--seed", type=int, default=0, help="Random seed for reproducibility")
+    p.add_argument(
+        "--seed", type=int, default=0, help="Random seed for reproducibility"
+    )
     args = p.parse_args()
 
     # Set defaults that depend on --dataset
@@ -138,7 +139,7 @@ def build_results_dict(
     """Build a JSON-serialisable results dictionary."""
 
     def to_list(x):
-        if isinstance(x, (np.ndarray, torch.Tensor)):
+        if isinstance(x, np.ndarray | torch.Tensor):
             return x.tolist()
         return x
 
