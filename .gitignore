@@ -189,3 +189,6 @@ feature_cache_old/
 uv.lock
 *.gz
 *.pt
+
+
+CLAUDE.md
