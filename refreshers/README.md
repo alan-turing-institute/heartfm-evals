@@ -20,3 +20,6 @@ that is the decision-record folder and it *is* meant to persist.
 
 - [2026-08-09-segmentation.md](2026-08-09-segmentation.md) — segmentation code path, the
   `main` / `sam2-classification` fork, full Dice tables, and eight known issues.
+- [2026-08-09-classification.md](2026-08-09-classification.md) — classification code path,
+  AUC/accuracy tables across all three datasets, the gap to the published CineMA fine-tune,
+  and eleven known issues.
