@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Run all logreg and frozen-finetune classification experiments across all datasets.
-# SAM uses gap only (no CLS token); CineMA and DINOv3 run both cls and gap.
+# Both SAM families use gap only (no CLS token); CineMA and DINOv3 run cls and gap.
 
 set -euo pipefail
 
@@ -30,10 +30,16 @@ for dataset in "${DATASETS[@]}"; do
         done
     done
 
-    # ── SAM (gap only — no CLS token) ──
+    # ── SAM v1 (gap only — no CLS token) ──
     for model in facebook/sam-vit-base facebook/sam-vit-large facebook/sam-vit-huge; do
         run --dataset "$dataset" --backbone sam --sam-model-id "$model" --eval-mode logreg   --pooling gap
         run --dataset "$dataset" --backbone sam --sam-model-id "$model" --eval-mode finetune --pooling gap
+    done
+
+    # ── SAM2 (gap only — Hiera has no CLS token) ──
+    for model in facebook/sam2.1-hiera-small facebook/sam2.1-hiera-base-plus facebook/sam2.1-hiera-large; do
+        run --dataset "$dataset" --backbone sam2 --sam2-model-id "$model" --eval-mode logreg   --pooling gap
+        run --dataset "$dataset" --backbone sam2 --sam2-model-id "$model" --eval-mode finetune --pooling gap
     done
 done
 

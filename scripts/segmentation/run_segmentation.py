@@ -33,6 +33,7 @@ from heartfm_evals.caching import (
     cache_dino_volume_features,
     cache_features,
     cache_sam2_2d_features,
+    cache_sam_2d_features,
     cache_sam_volume_features,
 )
 from heartfm_evals.constants import CLASS_NAMES, NUM_CLASSES
@@ -54,7 +55,9 @@ from heartfm_evals.training import (
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Unified segmentation evaluation")
-    p.add_argument("--backbone", required=True, choices=["dinov3", "cinema", "sam2"])
+    p.add_argument(
+        "--backbone", required=True, choices=["dinov3", "cinema", "sam", "sam2"]
+    )
     p.add_argument(
         "--decoder", required=True, choices=["linear_probe", "conv_decoder", "unetr"]
     )
@@ -62,11 +65,17 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--data-dir", type=Path, default=None)
     p.add_argument("--output-dir", type=Path, default=None)
     p.add_argument("--cache-dir", type=Path, default=None)
+    p.add_argument(
+        "--cache-only",
+        action="store_true",
+        help="Extract and cache features, then exit without training",
+    )
 
     # Model selection
     p.add_argument("--dinov3-model-name", default="dinov3_vits16")
     p.add_argument("--dinov3-repo-dir", default="models/dinov3/")
     p.add_argument("--dinov3-weights-path", default=None)
+    p.add_argument("--sam-model-id", default="facebook/sam-vit-base")
     p.add_argument("--sam2-model-id", default="facebook/sam2.1-hiera-base-plus")
     p.add_argument("--hf-cache-dir", type=Path, default=Path("model_weights/hf"))
 
@@ -87,6 +96,12 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--patience", type=int, default=20)
     p.add_argument("--dropout", type=float, default=0.1)
     p.add_argument("--seed", type=int, default=0)
+    p.add_argument(
+        "--max-patients",
+        type=int,
+        default=None,
+        help="Limit number of patients (for debugging/smoke tests)",
+    )
     p.add_argument("--device", default=None)
     p.add_argument(
         "--no-auto-download", action="store_true", help="Disable HF auto-download"
@@ -96,7 +111,7 @@ def parse_args() -> argparse.Namespace:
 
     # Defaults
     if args.data_dir is None:
-        args.data_dir = Path(f"data/heartfm/processed/{args.dataset}")
+        args.data_dir = Path(f"../data/heartfm/processed/{args.dataset}")
     if args.output_dir is None:
         args.output_dir = Path(f"results/segmentation/{args.dataset}")
 
@@ -106,6 +121,8 @@ def parse_args() -> argparse.Namespace:
 def derive_model_name(args: argparse.Namespace) -> str:
     if args.backbone == "cinema":
         return "cinema_pretrained"
+    if args.backbone == "sam":
+        return args.sam_model_id.split("/")[-1].replace("-", "_")
     if args.backbone == "sam2":
         return args.sam2_model_id.split("/")[-1].replace("-", "_").replace(".", "_")
     return args.dinov3_model_name
@@ -179,13 +196,17 @@ def main() -> None:
     model_name = derive_model_name(args)
     cache_dir = derive_cache_dir(args, model_name)
 
-    base_name = f"{model_name}_{args.decoder}"
-    args.output_dir.mkdir(parents=True, exist_ok=True)
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    json_path = args.output_dir / f"{base_name}_{timestamp}.json"
-    if json_path.exists():
-        print(f"Skipping: {json_path} already exists.")
-        return
+    # Only touch results/ when we are actually going to train — a --cache-only
+    # run must not create empty output directories.
+    json_path = None
+    if not args.cache_only:
+        base_name = f"{model_name}_{args.decoder}"
+        args.output_dir.mkdir(parents=True, exist_ok=True)
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        json_path = args.output_dir / f"{base_name}_{timestamp}.json"
+        if json_path.exists():
+            print(f"Skipping: {json_path} already exists.")
+            return
 
     print(f"Dataset: {args.dataset}")
     print(f"Device: {device}")
@@ -202,6 +223,10 @@ def main() -> None:
         backbone_kwargs["dinov3_repo_dir"] = args.dinov3_repo_dir
         if args.dinov3_weights_path:
             backbone_kwargs["dinov3_weights_path"] = args.dinov3_weights_path
+    elif args.backbone == "sam":
+        backbone_kwargs["sam_model_id"] = args.sam_model_id
+        backbone_kwargs["hf_cache_dir"] = str(args.hf_cache_dir)
+        backbone_kwargs["auto_download"] = not args.no_auto_download
     elif args.backbone == "sam2":
         backbone_kwargs["sam2_model_id"] = args.sam2_model_id
         backbone_kwargs["hf_cache_dir"] = str(args.hf_cache_dir)
@@ -235,12 +260,13 @@ def main() -> None:
             args.dataset,
             args.data_dir,
             split_seed=args.seed,
+            max_patients=args.max_patients,
         )
     )
     print(f"Train: {len(train_ds)}, Val: {len(val_ds)}, Test: {len(test_ds)}")
 
     # ── Cache features ──
-    sam_processor = config.get("sam2_processor")
+    sam_processor = config.get("sam_image_processor") or config.get("sam2_processor")
 
     if is_volume:
         # 3D volume caching
@@ -264,7 +290,7 @@ def main() -> None:
             test_manifest = cache_cinema_volume_features(
                 backbone, test_ds, cache_dir / "test", device
             )
-        else:  # sam2
+        else:  # sam or sam2 — one extractor serves both families
             train_manifest = cache_sam_volume_features(
                 backbone,
                 sam_processor,
@@ -311,21 +337,67 @@ def main() -> None:
             test_manifest = cache_cinema_2d_features(
                 backbone, test_ds, cache_dir / "test", device
             )
+        elif args.backbone == "sam":
+            train_manifest = cache_sam_2d_features(
+                backbone,
+                sam_processor,
+                train_ds,
+                cache_dir / "train",
+                layer_indices,
+                device,
+            )
+            val_manifest = cache_sam_2d_features(
+                backbone,
+                sam_processor,
+                val_ds,
+                cache_dir / "val",
+                layer_indices,
+                device,
+            )
+            test_manifest = cache_sam_2d_features(
+                backbone,
+                sam_processor,
+                test_ds,
+                cache_dir / "test",
+                layer_indices,
+                device,
+            )
         else:  # sam2
             train_manifest = cache_sam2_2d_features(
-                backbone, sam_processor, train_ds, cache_dir / "train", layer_indices, device
+                backbone,
+                sam_processor,
+                train_ds,
+                cache_dir / "train",
+                layer_indices,
+                device,
             )
             val_manifest = cache_sam2_2d_features(
-                backbone, sam_processor, val_ds, cache_dir / "val", layer_indices, device
+                backbone,
+                sam_processor,
+                val_ds,
+                cache_dir / "val",
+                layer_indices,
+                device,
             )
             test_manifest = cache_sam2_2d_features(
-                backbone, sam_processor, test_ds, cache_dir / "test", layer_indices, device
+                backbone,
+                sam_processor,
+                test_ds,
+                cache_dir / "test",
+                layer_indices,
+                device,
             )
 
     print(
         f"Cached: train={len(train_manifest)}, val={len(val_manifest)}, "
         f"test={len(test_manifest)}"
     )
+
+    if args.cache_only:
+        print(f"Cache-only: features written to {cache_dir}")
+        return
+
+    assert json_path is not None  # set above whenever cache_only is False
 
     # ── Build DataLoaders ──
     if is_volume:

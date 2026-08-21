@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 # Smoke test: all model versions, logreg only, one pooling each, minimal patients.
-# 50 patients is the minimum that reliably covers all 5 pathology classes for 10-fold CV.
+#
+# --max-patients subsets *stratified by pathology*, so 50 patients gives 10 of each
+# of ACDC's 5 classes -- exactly what the 10-fold stratified CV needs.  (Plain
+# head(50) would give only 3 classes: the ACDC metadata is sorted by pathology.)
 
 set -euo pipefail
 

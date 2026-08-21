@@ -8,8 +8,8 @@ Supported backbone types:
 
 * ``"dinov3"`` – DINOv3 ViT loaded via local ``torch.hub``.
 * ``"cinema"`` – CineMA 3-D cardiac ViT from HuggingFace.
-* ``"sam"``   – SAM v1 (used for classification).
-* ``"sam2"``  – SAM 2.1 Hiera (used for segmentation).
+* ``"sam"``   – SAM v1 ViT (segmentation and classification).
+* ``"sam2"``  – SAM 2.1 Hiera (segmentation and classification).
 """
 
 from __future__ import annotations
@@ -42,25 +42,62 @@ DINOV3_CONFIGS: dict[str, dict[str, Any]] = {
     },
 }
 
+# ── SAM v1 ViT configs ───────────────────────────────────────────────────────
+# hidden_states from transformers includes the initial patch embedding as
+# index 0, so hidden_states[i+1] is the output of block i.  Unlike SAM2's Hiera
+# encoder, the SAM v1 ViT is uniform: every block emits the same channel count
+# at 64x64, so ``layer_indices`` is just evenly spaced quartiles of the depth.
+SAM_CONFIGS: dict[str, dict[str, Any]] = {
+    "facebook/sam-vit-base": {
+        "embed_dim": 768,
+        "n_layers": 12,
+        "layer_indices": (2, 5, 8, 11),
+    },
+    "facebook/sam-vit-large": {
+        "embed_dim": 1024,
+        "n_layers": 24,
+        "layer_indices": (5, 11, 17, 23),
+    },
+    "facebook/sam-vit-huge": {
+        "embed_dim": 1280,
+        "n_layers": 32,
+        "layer_indices": (7, 15, 23, 31),
+    },
+}
+
 # ── SAM 2.1 Hiera configs ────────────────────────────────────────────────────
 # hidden_states from transformers includes the initial patch embedding as
 # index 0, so hidden_states[i+1] is the output of block i.  Stage-2 block
 # ranges are shifted +1 vs raw block numbers.
+#
+# embed_dim:      Stage 3 channel count — what ``layer_indices`` below points at,
+#                 used by segmentation.
+# cls_embed_dim:  Stage 4 channel count — used by classification, which GAPs
+#                 ``hidden_states[-1]`` (the true final block) rather than a
+#                 ``layer_indices`` entry.  See prompts/sam2_decisions.md.
+#
+# All four ``layer_indices`` deliberately land inside Stage 3, so every extracted
+# layer has the same channel count and resolution.  See prompts/sam2_decisions.md
+# for why the multi-scale (one-block-per-stage) alternative was not adopted.
 SAM2_CONFIGS: dict[str, dict[str, Any]] = {
     "facebook/sam2.1-hiera-tiny": {
         "embed_dim": 384,
+        "cls_embed_dim": 768,
         "layer_indices": (4, 6, 8, 10),
     },
     "facebook/sam2.1-hiera-small": {
         "embed_dim": 384,
+        "cls_embed_dim": 768,
         "layer_indices": (4, 7, 11, 14),
     },
     "facebook/sam2.1-hiera-base-plus": {
         "embed_dim": 448,
+        "cls_embed_dim": 896,
         "layer_indices": (6, 11, 16, 21),
     },
     "facebook/sam2.1-hiera-large": {
         "embed_dim": 576,
+        "cls_embed_dim": 1152,
         "layer_indices": (9, 21, 33, 44),
     },
 }
@@ -193,6 +230,17 @@ def _load_sam(
 ) -> tuple[nn.Module, dict[str, Any]]:
     from transformers import SamImageProcessor, SamModel
 
+    # Check the config before any download so an unknown id fails fast with a
+    # useful message rather than an HTTP 404 from the hub.
+    if model_id not in SAM_CONFIGS:
+        msg = (
+            f"Unknown SAM v1 model_id: {model_id!r}. "
+            f"Known: {sorted(SAM_CONFIGS)}. Add it to SAM_CONFIGS with the "
+            "layer_indices appropriate for its depth."
+        )
+        raise ValueError(msg)
+    cfg = SAM_CONFIGS[model_id]
+
     processor = SamImageProcessor.from_pretrained(
         model_id,
         cache_dir=str(hf_cache_dir),
@@ -203,6 +251,9 @@ def _load_sam(
         cache_dir=str(hf_cache_dir),
         local_files_only=not auto_download,
     )
+
+    # Read embed_dim from the checkpoint config rather than SAM_CONFIGS so the
+    # loaded weights stay the source of truth.
     embed_dim: int = backbone.config.vision_config.hidden_size
     _freeze(backbone).to(device)
 
@@ -210,6 +261,8 @@ def _load_sam(
         "backbone_type": "sam",
         "model_name": model_id.split("/")[-1].replace("-", "_"),
         "embed_dim": embed_dim,
+        "n_layers": cfg["n_layers"],
+        "layer_indices": cfg["layer_indices"],
         "sam_image_processor": processor,
     }
 
@@ -235,8 +288,9 @@ def _load_sam2(
 
     return backbone, {
         "backbone_type": "sam2",
-        "model_name": model_id.split("/")[-1].replace(".", "_"),
+        "model_name": model_id.split("/")[-1].replace(".", "_").replace("-", "_"),
         "embed_dim": cfg["embed_dim"],
+        "cls_embed_dim": cfg["cls_embed_dim"],
         "layer_indices": cfg["layer_indices"],
         "sam2_processor": processor,
     }

@@ -1,8 +1,8 @@
 """Feature extraction utilities for frozen backbone models.
 
 Provides preprocessing and feature extraction functions for:
-- 2D spatial features (DINOv3 multi-layer, SAM2 Hiera)
-- 3D volume features (DINOv3, CineMA, SAM v1)
+- 2D spatial features (DINOv3 multi-layer, SAM v1 ViT, SAM2 Hiera)
+- 3D volume features (DINOv3, CineMA, SAM v1 / SAM2)
 
 All functions operate on frozen backbones and return CPU tensors.
 """
@@ -206,13 +206,18 @@ def extract_sam_volume_features(
 
     For each slice, runs the frozen SAM vision encoder with
     ``output_hidden_states=True`` and extracts intermediate hidden states at
-    the specified layers.  The 64x64 feature maps are downsampled to
+    the specified layers.  The feature maps are downsampled to
     *grid_size* x *grid_size* so the output is compatible with
     ``DINOv3UNetRDecoder``.
 
+    Serves **both** SAM v1 (``SamModel``, 64x64 hidden states) and SAM2
+    (``Sam2Model``, Hiera hidden states): both vision encoders emit
+    channels-last hidden states that are interpolated to *grid_size* here, so
+    the differing native resolutions are handled transparently.
+
     Args:
-        sam_model: Frozen ``SamModel`` in eval mode.
-        processor: ``SamImageProcessor`` for image pre-processing.
+        sam_model: Frozen ``SamModel`` or ``Sam2Model`` in eval mode.
+        processor: ``SamImageProcessor`` / ``Sam2Processor`` for pre-processing.
         sax_volume: ``(1, H, W, z)`` tensor in [0, 1].
         layer_indices: Which intermediate ViT layers to extract.
         device: Device for inference.
@@ -244,11 +249,12 @@ def extract_sam_volume_features(
 
         # Get intermediate hidden states from SAM vision encoder
         enc_out = sam_model.vision_encoder(pixel_values, output_hidden_states=True)
-        hidden_states = enc_out.hidden_states  # tuple of (B, 64, 64, 768)
+        # tuple of (B, h, w, C) — channels-last
+        hidden_states = enc_out.hidden_states
 
         for idx in layer_indices:
-            feat = hidden_states[idx]  # (1, 64, 64, 768) — channels-last
-            feat = feat.permute(0, 3, 1, 2)  # (1, 768, 64, 64)
+            feat = hidden_states[idx]  # (1, h, w, C) — channels-last
+            feat = feat.permute(0, 3, 1, 2)  # (1, C, h, w)
             # Downsample to match DINOv3 grid size
             feat = F.interpolate(
                 feat,
@@ -256,7 +262,7 @@ def extract_sam_volume_features(
                 mode="bilinear",
                 align_corners=False,
             )
-            per_layer[idx].append(feat.squeeze(0).cpu())  # (768, gs, gs)
+            per_layer[idx].append(feat.squeeze(0).cpu())  # (C, gs, gs)
 
     features_dict: dict[str, torch.Tensor] = {}
     for idx in layer_indices:
@@ -264,6 +270,57 @@ def extract_sam_volume_features(
         # shape: (embed_dim, grid_size, grid_size, target_depth)
 
     return features_dict, vol, n_slices
+
+
+# ── 2D SAM v1 Slice Feature Extraction ───────────────────────────────────────
+@torch.inference_mode()
+def extract_sam_2d_features(
+    sam_model: nn.Module,
+    processor,
+    image_2d: torch.Tensor,
+    layer_indices: tuple[int, ...],
+    device: torch.device | None = None,
+    grid_size: int = GRID_SIZE,
+) -> torch.Tensor:
+    """Extract multi-layer SAM v1 ViT features for a single 2D slice.
+
+    Mirrors :func:`extract_sam2_2d_features` for the SAM v1 vision encoder.
+    The 64x64 feature maps are downsampled to *grid_size* x *grid_size* and
+    concatenated along the channel dimension.
+
+    Args:
+        sam_model: Frozen ``SamModel`` in eval mode.
+        processor: ``SamImageProcessor`` for pre-processing.
+        image_2d: ``(H, W)`` tensor in [0, 1].
+        layer_indices: Which intermediate ViT layers to extract.
+        device: Device for inference.
+        grid_size: Downsample spatial dims to this size (default 12).
+
+    Returns:
+        ``(embed_dim * n_layers, grid_size, grid_size)`` tensor.
+    """
+    img_np = (image_2d.clamp(0, 1).cpu().numpy() * 255.0).astype(np.uint8)
+    pil = Image.fromarray(img_np, mode="L").convert("RGB")
+
+    proc = processor(images=pil, return_tensors="pt")
+    pixel_values = proc["pixel_values"]
+    if device is not None:
+        pixel_values = pixel_values.to(device)
+
+    enc_out = sam_model.vision_encoder(pixel_values, output_hidden_states=True)
+    # tuple of (1, 64, 64, embed_dim) — channels-last
+    hidden_states = enc_out.hidden_states
+
+    feats = []
+    for idx in layer_indices:
+        feat = hidden_states[idx]  # (1, 64, 64, embed_dim)
+        feat = feat.permute(0, 3, 1, 2)  # (1, embed_dim, 64, 64)
+        feat = F.interpolate(
+            feat, size=(grid_size, grid_size), mode="bilinear", align_corners=False
+        )
+        feats.append(feat.squeeze(0).cpu())  # (embed_dim, gs, gs)
+
+    return torch.cat(feats, dim=0)  # (embed_dim * n_layers, gs, gs)
 
 
 # ── 2D CineMA Slice Feature Extraction ────────────────────────────────────────

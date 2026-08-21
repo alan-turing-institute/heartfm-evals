@@ -18,8 +18,9 @@ Three cardiac MRI datasets are supported:
 | **M&Ms** | 317 (150 train / 33 val / 134 test) | NOR, DCM, HCM, ARV, HHD |
 | **M&Ms-2** | 351 (156 train / 38 val / 157 test) | NOR, HCM, ARR, CIA, FALL, LV |
 
-All datasets are expected under `data/heartfm/processed/{dataset}/` and must
-provide `train_metadata.csv` and `test_metadata.csv`. If a
+All datasets are expected under `../data/heartfm/processed/{dataset}/` (one
+level above the repo root) and must provide `train_metadata.csv` and
+`test_metadata.csv`. If a
 `val_metadata.csv` is also present, it is used as a dedicated validation
 split instead of K-fold CV.
 
@@ -36,13 +37,18 @@ training.
 | ---------- | ------------- | ---------------------------------------- |
 | **CineMA** | 3D SAX volume | Masked autoencoder on 15M cine images    |
 | **DINOv3** | 2D slices     | Self-supervised (DINO) on natural images |
-| **SAM**    | 2D slices     | Segment Anything on natural images       |
+| **SAM v1** | 2D slices     | Segment Anything on natural images       |
+| **SAM2**   | 2D slices     | Segment Anything 2 (Hiera) on natural images + video |
 
 All backbones produce one embedding vector per 2D slice (CineMA: per 3D
 volume). Patient-level features are obtained by mean-pooling ED and ES
 embeddings separately, then concatenating into a single vector. Two pooling
 modes are compared: CLS token (`cls`) and global average pooling (`gap`).
-SAM only supports `gap` (no CLS token).
+Neither SAM family has a CLS token, so both support `gap` only.
+
+SAM2 pools its **Stage 4** (final) Hiera hidden state, whose width is
+`cls_embed_dim` (768/768/896/1152) rather than the Stage 3 `embed_dim` used for
+segmentation — see [../../prompts/sam2_decisions.md](../../prompts/sam2_decisions.md).
 
 ## Evaluation Modes
 
@@ -86,13 +92,14 @@ python scripts/classification/build_summary.py
 | Option | Default | Description |
 | ------ | ------- | ----------- |
 | `--dataset` | `acdc` | Dataset: `acdc`, `mnm`, or `mnm2` |
-| `--backbone` | — | `cinema`, `dinov3`, or `sam` |
+| `--backbone` | — | `cinema`, `dinov3`, `sam`, or `sam2` |
 | `--eval-mode` | — | `logreg` or `finetune` |
-| `--pooling` | `cls` | `cls` or `gap` (SAM: `gap` only) |
+| `--pooling` | `cls` | `cls` or `gap` (`sam`/`sam2`: `gap` only) |
 | `--freeze-backbone` / `--no-freeze-backbone` | frozen | Fine-tune mode only |
-| `--data-dir` | `data/heartfm/processed/{dataset}` | Override data directory |
+| `--data-dir` | `../data/heartfm/processed/{dataset}` | Override data directory |
 | `--output-dir` | `results/classification/{dataset}` | Override output directory |
-| `--max-patients` | — | Limit patients (for debugging/smoke tests) |
+| `--max-patients` | — | Limit patients, stratified across pathology classes (for smoke tests) |
+| `--cache-only` | off | Extract and cache features, then exit without training |
 
 ## Metrics
 

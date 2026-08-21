@@ -1,21 +1,26 @@
 """Logistic-regression classification probe for patient-level pathology prediction.
 
-Supports three frozen backbones with a shared downstream protocol:
+Supports four frozen backbones with a shared downstream protocol:
 
     1. **DINOv3**: extract CLS token or GAP of patch tokens per 2D slice →
        one ``(embed_dim,)`` embedding per slice.
     2. **CineMA**: run ``feature_forward()`` on the 3D SAX volume and
        extract the CLS token or global-mean-pool all spatial tokens → one
        ``(embed_dim,)`` embedding per cardiac-phase volume.
-    3. **SAM**: run ``get_image_embeddings()`` on each 2D slice (converted to
+    3. **SAM v1**: run ``get_image_embeddings()`` on each 2D slice (converted to
        RGB via ``SamImageProcessor``), global-average-pool the spatial feature
        map ``(C, h, w)`` → one ``(C,)`` embedding per slice (no CLS token).
+    4. **SAM2**: run the Hiera vision encoder on each 2D slice and
+       global-average-pool the Stage 4 (final) hidden state → one
+       ``(cls_embed_dim,)`` embedding per slice (no CLS token).
 
-DINOv3 and SAM produce one embedding per 2D slice; CineMA produces one
-embedding per 3D volume.  Patient-level features are built identically:
-mean-pool ED embeddings, mean-pool ES embeddings, concatenate →
-``(2 × embed_dim,)`` vector → sklearn LogisticRegression with L2 penalty
-and C-sweep via stratified CV.
+DINOv3, SAM v1, and SAM2 produce one embedding per 2D slice; CineMA produces one
+embedding per 3D volume.  Neither SAM family has a CLS token, so both are
+GAP-only — ``--pooling cls`` is rejected for them.
+
+Patient-level features are built identically for all four: mean-pool ED
+embeddings, mean-pool ES embeddings, concatenate → ``(2 × embed_dim,)`` vector →
+sklearn LogisticRegression with L2 penalty and C-sweep via stratified CV.
 """
 
 from __future__ import annotations
@@ -413,6 +418,82 @@ def cache_sam_cls_features(
                 hidden = layer(hidden)
             # hidden: (1, h, w, C) — before the neck projection
             cls_token = hidden.squeeze(0).mean(dim=(0, 1)).cpu()  # (C,)
+
+            torch.save({"cls_token": cls_token}, fpath)
+            manifest.append({"path": fpath, "pid": pid, "is_ed": is_ed, "z_idx": z})
+
+    return manifest
+
+
+@torch.inference_mode()
+def cache_sam2_cls_features(
+    sam2_model: nn.Module,
+    image_processor,
+    cinema_dataset,
+    cache_dir: Path,
+    device: torch.device | None = None,
+) -> list[dict]:
+    """Extract and cache GAP SAM2 Hiera vision-encoder embeddings, one .pt per slice.
+
+    For each 2D slice, runs SAM2's vision encoder with ``output_hidden_states=True``
+    and global-average-pools ``hidden_states[-1]`` (the true final block, Stage 4)
+    ``(H', W', C)`` → ``(C,)``, saved as ``{"cls_token": Tensor(C,)}`` — the same
+    format as every other backbone, so :func:`load_cached_cls_features` and
+    :func:`build_patient_features` work unchanged.
+
+    Stage 4 is used rather than Stage 3 (where ``SAM2_CONFIGS["layer_indices"]``
+    points, for segmentation) because Stage 4 is the model's genuine final
+    output — semantically richer and analogous to what DINOv3, CineMA, and SAM v1
+    contribute for classification.  The corresponding channel dimension is
+    ``cls_embed_dim`` in ``SAM2_CONFIGS`` (768/768/896/1152), *not* ``embed_dim``.
+    See ``prompts/sam2_decisions.md``.
+
+    Args:
+        sam2_model: Frozen ``Sam2Model`` in eval mode.
+        image_processor: ``Sam2Processor`` for pre-processing slices.
+        cinema_dataset: CineMA EndDiastoleEndSystoleDataset.
+        cache_dir: Directory to save cached tokens.
+        device: Device for inference.
+
+    Returns:
+        Manifest — list of dicts with keys ``path``, ``pid``, ``is_ed``, ``z_idx``.
+    """
+    from PIL import Image
+
+    cache_dir = Path(cache_dir)
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    manifest: list[dict] = []
+
+    for sample_idx in tqdm(range(len(cinema_dataset)), desc="Caching SAM2 features"):
+        sample = cinema_dataset[sample_idx]
+        image_3d = sample["sax_image"]  # (1, H, W, z)
+        n_slices = int(sample["n_slices"])
+        pid = sample["pid"]
+        is_ed = sample["is_ed"]
+        frame = "ed" if is_ed else "es"
+
+        for z in range(n_slices):
+            fname = f"{pid}_{frame}_z{z:02d}.pt"
+            fpath = cache_dir / fname
+
+            if fpath.exists():
+                manifest.append({"path": fpath, "pid": pid, "is_ed": is_ed, "z_idx": z})
+                continue
+
+            image_2d = image_3d[0, :, :, z]  # (H, W) in [0, 1]
+            img_np = (image_2d.clamp(0, 1).cpu().numpy() * 255.0).astype(np.uint8)
+            pil = Image.fromarray(img_np, mode="L").convert("RGB")
+
+            proc = image_processor(images=pil, return_tensors="pt")
+            pixel_values = proc["pixel_values"]
+            if device is not None:
+                pixel_values = pixel_values.to(device)
+
+            enc_out = sam2_model.vision_encoder(pixel_values, output_hidden_states=True)
+            # tuple of (1, H', W', C) — channels-last
+            hidden_states = enc_out.hidden_states
+            feat = hidden_states[-1]  # Stage 4, true final block
+            cls_token = feat.squeeze(0).mean(dim=(0, 1)).cpu()  # (C,)
 
             torch.save({"cls_token": cls_token}, fpath)
             manifest.append({"path": fpath, "pid": pid, "is_ed": is_ed, "z_idx": z})

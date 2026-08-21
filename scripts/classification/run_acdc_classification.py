@@ -43,6 +43,7 @@ from heartfm_evals.classification_probe import (
     load_cached_cls_features,
     sweep_C_and_train,
 )
+from heartfm_evals.data import subset_patients_stratified
 from heartfm_evals.finetune_classification import (
     evaluate_finetune_classification,
     finetune_sweep_and_train,
@@ -68,7 +69,9 @@ def parse_args() -> argparse.Namespace:
         help="Freeze backbone in finetune mode (default: True). Use --no-freeze-backbone to unfreeze.",
     )
     p.add_argument("--pooling", default="cls", choices=["cls", "gap"])
-    p.add_argument("--data-dir", type=Path, default=Path("data/heartfm/processed/acdc"))
+    p.add_argument(
+        "--data-dir", type=Path, default=Path("../data/heartfm/processed/acdc")
+    )
     p.add_argument("--output-dir", type=Path, default=Path("results/classification"))
     p.add_argument(
         "--device", default=None, help="Override device (default: auto-detect)"
@@ -279,8 +282,10 @@ def main():
     train_meta_df = pd.read_csv(args.data_dir / "train_metadata.csv")
     test_meta_df = pd.read_csv(args.data_dir / "test_metadata.csv")
     if args.max_patients:
-        train_meta_df = train_meta_df.head(args.max_patients)
-        test_meta_df = test_meta_df.head(args.max_patients)
+        # Stratified, not head(): the ACDC metadata is sorted by pathology, so
+        # head(50) covers only 3 of its 5 classes.
+        train_meta_df = subset_patients_stratified(train_meta_df, args.max_patients)
+        test_meta_df = subset_patients_stratified(test_meta_df, args.max_patients)
     print(f"Train: {len(train_meta_df)} patients, Test: {len(test_meta_df)} patients")
 
     transform = ScaleIntensityd(keys="sax_image", factor=1 / 255, channel_wise=False)
