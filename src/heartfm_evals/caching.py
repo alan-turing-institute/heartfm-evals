@@ -366,13 +366,18 @@ def cache_cinema_2d_features(
         is_ed = sample["is_ed"]
         frame = "ed" if is_ed else "es"
 
+        # The feature volume is truncated to SAX_TARGET_DEPTH, so slices beyond
+        # it have no features and are not cached.  Rare: only M&M2 has patients
+        # with more than 16 slices.
+        n_cached = min(n_slices, SAX_TARGET_DEPTH)
+
         # Skip backbone forward pass if all slices are already cached
         all_cached = all(
             (cache_dir / f"{pid}_{frame}_z{z_idx:02d}.pt").exists()
-            for z_idx in range(n_slices)
+            for z_idx in range(n_cached)
         )
         if all_cached:
-            for z_idx in range(n_slices):
+            for z_idx in range(n_cached):
                 fpath = cache_dir / f"{pid}_{frame}_z{z_idx:02d}.pt"
                 manifest.append(
                     {"path": fpath, "pid": pid, "is_ed": is_ed, "z_idx": z_idx}
@@ -382,9 +387,13 @@ def cache_cinema_2d_features(
         feat_vol, used_depth = extract_cinema_2d_feature_volume(
             backbone, image_3d, device
         )
-        gz = feat_vol.shape[-1]
+        # ``used_depth`` is the real slice count after the same truncation, so it
+        # must agree with the bound the skip-check above was computed from.
+        assert used_depth == n_cached, (
+            f"{pid}_{frame}: feature depth {used_depth} != expected {n_cached}"
+        )
 
-        for z_idx in range(n_slices):
+        for z_idx in range(n_cached):
             fname = f"{pid}_{frame}_z{z_idx:02d}.pt"
             fpath = cache_dir / fname
 
@@ -394,16 +403,12 @@ def cache_cinema_2d_features(
                 )
                 continue
 
-            # Map original slice index to feature-volume depth index
-            src_z = min(z_idx, max(used_depth - 1, 0))
-            feat_z = int(round(src_z * (gz - 1) / max(used_depth - 1, 1)))
-
-            # ``.contiguous()`` is load-bearing: slicing ``feat_vol`` yields a
-            # strided view whose *whole* underlying storage (C, gx, gy, Z) would
-            # otherwise be serialised by ``torch.save`` — 16x the feature tensor
-            # (7.0 MB vs 0.44 MB), ~10x the file once the label is counted.
-            # Values are unaffected; only the serialised storage shrinks.
-            feats_2d = feat_vol[..., feat_z].contiguous()  # (C, gx, gy)
+            # The feature volume's depth axis is 1:1 with the padded input z:
+            # nothing in the CineMA encoder downsamples z (conv strides are
+            # (4,4,1) and (2,2,1); the patch size is (2,2,1)), so slice z_idx is
+            # at depth z_idx.  Do NOT rescale here -- that is only appropriate
+            # for the in-plane axes, which are reduced 192 -> 12.
+            feats_2d = feat_vol[..., z_idx].contiguous()   # z-fix from main + contiguous from your branch
             label_2d = label_3d[0, :, :, z_idx].contiguous()
 
             torch.save({"features": feats_2d, "label": label_2d.long()}, fpath)
