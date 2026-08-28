@@ -351,7 +351,7 @@ def main():
 
     # ── Feature caching (shared by logreg and finetune) ──
     cls_cache_dir = args.cls_cache_dir or Path(
-        f"classification_feature_cache/{args.dataset}/{model_name}/{args.pooling}"
+        f"feature_cache_classification/{args.dataset}/{model_name}/{args.pooling}"
     )
 
     if args.backbone == "cinema":

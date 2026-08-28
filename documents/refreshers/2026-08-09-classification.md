@@ -46,7 +46,7 @@ constants (see below).
 
 Flow: load metadata → `EndDiastoleEndSystoleDataset` (CineMA package, `views="sax"`) →
 `load_backbone()` (frozen) → cache one pooled embedding per slice/frame into
-`classification_feature_cache/{dataset}/{model}/{pooling}/{split}/` → `build_patient_features`
+`feature_cache_classification/{dataset}/{model}/{pooling}/{split}/` → `build_patient_features`
 (mean-pool ED slices, mean-pool ES slices, concatenate → `(N, 2·embed_dim)`) → fit probe →
 evaluate N-way → evaluate a derived binary NOR-vs-rest task (from `1 − P(NOR)`, no retraining) →
 write one JSON to `results/classification/{dataset}/{model}_{tag}_{pooling}_{timestamp}.json`
