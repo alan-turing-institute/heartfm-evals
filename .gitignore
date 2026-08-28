@@ -184,6 +184,7 @@ scripts/**/*.out
 feature_cache_classification/
 linear_feature_cache/
 feature_cache_old/
+feature_cache_backups/
 
 # uv lock file (platform-specific, not suitable for cross-platform repos)
 uv.lock
