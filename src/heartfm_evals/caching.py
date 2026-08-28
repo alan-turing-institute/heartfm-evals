@@ -408,7 +408,12 @@ def cache_cinema_2d_features(
             # (4,4,1) and (2,2,1); the patch size is (2,2,1)), so slice z_idx is
             # at depth z_idx.  Do NOT rescale here -- that is only appropriate
             # for the in-plane axes, which are reduced 192 -> 12.
-            feats_2d = feat_vol[..., z_idx].contiguous()   # z-fix from main + contiguous from your branch
+            #
+            # ``.contiguous()`` is also load-bearing: slicing ``feat_vol`` yields
+            # a strided view whose *whole* underlying storage (C, gx, gy, Z) would
+            # otherwise be serialised by ``torch.save`` -- 16x the feature tensor
+            # (7.0 MB vs 0.44 MB).  Values are unaffected; only storage shrinks.
+            feats_2d = feat_vol[..., z_idx].contiguous()  # (C, gx, gy)
             label_2d = label_3d[0, :, :, z_idx].contiguous()
 
             torch.save({"features": feats_2d, "label": label_2d.long()}, fpath)
