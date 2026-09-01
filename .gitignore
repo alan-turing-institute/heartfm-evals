@@ -190,6 +190,3 @@ feature_cache_backups/
 uv.lock
 *.gz
 *.pt
-
-
-CLAUDE.md
