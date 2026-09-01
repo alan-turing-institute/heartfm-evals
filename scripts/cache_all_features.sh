@@ -22,10 +22,6 @@
 #   feature_cache_segmentation/{dataset}/{model}[_unetr3d]/{split}/
 #   feature_cache_classification/{dataset}/{model}/{pooling}/{split}/
 #
-# DISK: the full grid is roughly 600 GB (~190 GB of 2D caches, ~430 GB of 3D
-# volume caches; classification is ~1 GB).  Check free space before starting, and
-# consider going one dataset at a time with DATASETS=.
-#
 # RESUMABLE: every cache function skips files that already exist, so re-running
 # after an interruption picks up where it stopped.  The flip side is that a stale
 # file is never overwritten -- delete a cache directory to force regeneration.
