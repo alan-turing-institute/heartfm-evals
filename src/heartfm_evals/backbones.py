@@ -43,12 +43,10 @@ DINOV3_CONFIGS: dict[str, dict[str, Any]] = {
 }
 
 # ── SAM v1 ViT configs ───────────────────────────────────────────────────────
-# ``layer_indices`` here are **block** indices: 0-based, so the last block of a
-# 12-block ViT is 11.  hidden_states from transformers includes the initial patch
-# embedding as index 0, so hidden_states[i+1] is the output of block i, and the
-# extractors in features.py apply that +1 themselves (``hidden_state_offset=1``,
-# supplied via the loader metadata below).  Contrast SAM2_CONFIGS, whose indices
-# are already hidden_states indices — see features.py::_select_hidden_state.
+# ``layer_indices`` are **block** indices, 0-based — the one convention shared by
+# every backbone family here.  hidden_states from transformers includes the
+# initial patch embedding as index 0, so block i is read at hidden_states[i+1];
+# features.py::_block_hidden_state is the only place that +1 is applied.
 #
 # Unlike SAM2's Hiera encoder the SAM v1 ViT is uniform: every block emits the
 # same channel count at 64x64, so ``layer_indices`` is just spread through the
@@ -73,9 +71,12 @@ SAM_CONFIGS: dict[str, dict[str, Any]] = {
 }
 
 # ── SAM 2.1 Hiera configs ────────────────────────────────────────────────────
-# hidden_states from transformers includes the initial patch embedding as
-# index 0, so hidden_states[i+1] is the output of block i.  Stage-2 block
-# ranges are shifted +1 vs raw block numbers.
+# ``layer_indices`` are **block** indices, as for SAM v1 and DINOv3 — block i is
+# read at hidden_states[i+1] by features.py::_block_hidden_state.
+#
+# These were historically written as raw hidden_states positions, one higher than
+# the block they name; they were renumbered down by one when the shared block
+# convention landed (see issue #66).  The blocks read are unchanged.
 #
 # embed_dim:      Stage 3 channel count — what ``layer_indices`` below points at,
 #                 used by segmentation.
@@ -90,22 +91,26 @@ SAM2_CONFIGS: dict[str, dict[str, Any]] = {
     "facebook/sam2.1-hiera-tiny": {
         "embed_dim": 384,
         "cls_embed_dim": 768,
-        "layer_indices": (4, 6, 8, 10),
+        # Stage 3 spans blocks 3-9 (hidden_states[4..10])
+        "layer_indices": (3, 5, 7, 9),
     },
     "facebook/sam2.1-hiera-small": {
         "embed_dim": 384,
         "cls_embed_dim": 768,
-        "layer_indices": (4, 7, 11, 14),
+        # Stage 3 spans blocks 3-13 (hidden_states[4..14])
+        "layer_indices": (3, 6, 10, 13),
     },
     "facebook/sam2.1-hiera-base-plus": {
         "embed_dim": 448,
         "cls_embed_dim": 896,
-        "layer_indices": (6, 11, 16, 21),
+        # Stage 3 spans blocks 5-20 (hidden_states[6..21])
+        "layer_indices": (5, 10, 15, 20),
     },
     "facebook/sam2.1-hiera-large": {
         "embed_dim": 576,
         "cls_embed_dim": 1152,
-        "layer_indices": (9, 21, 33, 44),
+        # Stage 3 spans blocks 8-43 (hidden_states[9..44])
+        "layer_indices": (8, 20, 32, 43),
     },
 }
 
@@ -270,9 +275,6 @@ def _load_sam(
         "embed_dim": embed_dim,
         "n_layers": cfg["n_layers"],
         "layer_indices": cfg["layer_indices"],
-        # SAM_CONFIGS layer_indices are block indices, so +1 to reach the
-        # matching hidden_states entry (index 0 is the patch embedding).
-        "hidden_state_offset": 1,
         "sam_image_processor": processor,
     }
 
@@ -302,8 +304,5 @@ def _load_sam2(
         "embed_dim": cfg["embed_dim"],
         "cls_embed_dim": cfg["cls_embed_dim"],
         "layer_indices": cfg["layer_indices"],
-        # SAM2_CONFIGS layer_indices are already hidden_states indices, chosen so
-        # that all four land inside Stage 3 — no shift.
-        "hidden_state_offset": 0,
         "sam2_processor": processor,
     }

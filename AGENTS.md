@@ -116,12 +116,12 @@ DINOv3 backbones are re-exported by [models/dinov3/hubconf.py](models/dinov3/hub
   and `sam2` (2.1 Hiera, `SAM2_CONFIGS`). SAM2 segmentation reads Stage 3 (`embed_dim`);
   SAM2 classification reads Stage 4 (`cls_embed_dim`). Neither family has a CLS token, so
   both are `--pooling gap` only. See [prompts/sam2_decisions.md](prompts/sam2_decisions.md).
-- **The two SAM families index `layer_indices` differently.** `hidden_states[0]` is the patch
-  embedding, so block *i* is at `hidden_states[i+1]`. `SAM_CONFIGS` indices are **block**
-  indices (offset 1); `SAM2_CONFIGS` indices are already **`hidden_states`** indices (offset 0,
-  chosen so all four land in Stage 3 — shifting them changes the channel count).
-  `extract_sam_volume_features` serves both families and so takes a required
-  `hidden_state_offset`, carried in `load_backbone` metadata. Route every read through
-  `features.py::_select_hidden_state` rather than subscripting `hidden_states` directly.
+- **`layer_indices` are always block indices** — `DINOV3_CONFIGS`, `SAM_CONFIGS` and
+  `SAM2_CONFIGS` alike. `hidden_states[0]` is the patch embedding, so block *i* is read at
+  `hidden_states[i+1]`, and `features.py::_block_hidden_state` is the only place that `+1` is
+  applied. Never subscript `hidden_states` directly — that is what made SAM v1 skip its final
+  block (issue #66). SAM2's four indices must all stay inside Stage 3, whose per-model block
+  span is commented beside each `SAM2_CONFIGS` entry; leaving Stage 3 changes the channel count
+  and breaks the decoder.
 - Results files are committed and feed the analysis scripts: regenerate summaries after new runs, keep the `{name}_{timestamp}` convention.
 - Prefer cardiac-specific approaches over general-purpose image processing where the repo already has one.

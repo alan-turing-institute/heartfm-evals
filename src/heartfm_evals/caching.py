@@ -258,8 +258,6 @@ def cache_sam_volume_features(
     device: torch.device | None = None,
     target_depth: int = SAX_TARGET_DEPTH,
     grid_size: int = GRID_SIZE,
-    *,
-    hidden_state_offset: int,
 ) -> list[dict]:
     """Cache volume-level SAM ViT features for all patients/frames.
 
@@ -275,9 +273,6 @@ def cache_sam_volume_features(
         device: Device for inference.
         target_depth: Pad z to this depth.
         grid_size: Downsample spatial dims to this size (default 12).
-        hidden_state_offset: ``1`` for SAM v1, ``0`` for SAM2 — forwarded to
-            :func:`~heartfm_evals.features.extract_sam_volume_features`, which
-            serves both families.  Read it from ``load_backbone`` metadata.
 
     Returns:
         List of dicts with keys: ``path``, ``pid``, ``is_ed``, ``n_slices``.
@@ -315,7 +310,6 @@ def cache_sam_volume_features(
             device,
             target_depth,
             grid_size,
-            hidden_state_offset=hidden_state_offset,
         )
 
         # Pad label along z

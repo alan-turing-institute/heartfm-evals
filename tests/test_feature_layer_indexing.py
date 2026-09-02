@@ -1,9 +1,8 @@
 """Tests for ``hidden_states`` layer indexing in the SAM feature extractors.
 
 ``hidden_states[0]`` is the initial patch embedding, so block *i*'s output lives
-at ``hidden_states[i+1]``.  The two SAM families express ``layer_indices`` in
-different spaces — SAM v1 in block indices, SAM2 in ``hidden_states`` indices —
-and one extractor serves both, so these tests pin the convention down.
+at ``hidden_states[i+1]``.  Every ``layer_indices`` in this codebase is a block
+index, and these tests pin that single convention down for both SAM families.
 
 All stubs are synthetic: no model weights or datasets are downloaded.
 """
@@ -15,9 +14,9 @@ from types import SimpleNamespace
 import pytest
 import torch
 
-from heartfm_evals.backbones import SAM_CONFIGS
+from heartfm_evals.backbones import SAM2_CONFIGS, SAM_CONFIGS
 from heartfm_evals.features import (
-    _select_hidden_state,
+    _block_hidden_state,
     extract_sam2_2d_features,
     extract_sam_2d_features,
     extract_sam_volume_features,
@@ -61,21 +60,20 @@ def _layer_values(feats: torch.Tensor, n_layers: int) -> list[float]:
     return [float(c.unique().item()) for c in chunks]
 
 
-# ── _select_hidden_state ──────────────────────────────────────────────────────
+# ── _block_hidden_state ───────────────────────────────────────────────────────
 
 
-def test_select_hidden_state_offsets() -> None:
-    states = _hidden_states(13)
-    # SAM v1: block index 11 is the final block, at hidden_states[12].
-    assert _select_hidden_state(states, 11, 1).unique().item() == 12.0
-    # SAM2: indices are already hidden_states indices.
-    assert _select_hidden_state(states, 11, 0).unique().item() == 11.0
+def test_block_hidden_state_shifts_past_the_patch_embedding() -> None:
+    states = _hidden_states(13)  # 12 blocks + patch embedding
+    assert _block_hidden_state(states, 0).unique().item() == 1.0
+    # Block 11 is the final block of a 12-block ViT, at hidden_states[12].
+    assert _block_hidden_state(states, 11).unique().item() == 12.0
 
 
-def test_select_hidden_state_out_of_range() -> None:
+def test_block_hidden_state_out_of_range() -> None:
     states = _hidden_states(13)
     with pytest.raises(IndexError, match=r"hidden_states\[13\]"):
-        _select_hidden_state(states, 12, 1)
+        _block_hidden_state(states, 12)
 
 
 # ── SAM v1 ────────────────────────────────────────────────────────────────────
@@ -120,7 +118,6 @@ def test_sam_volume_features_apply_offset() -> None:
         layer_indices,
         target_depth=2,
         grid_size=GRID,
-        hidden_state_offset=1,
     )
 
     assert n_slices == 2
@@ -131,10 +128,10 @@ def test_sam_volume_features_apply_offset() -> None:
 # ── SAM2 ──────────────────────────────────────────────────────────────────────
 
 
-def test_sam2_2d_features_use_raw_hidden_state_indices() -> None:
-    """SAM2 indices are already hidden_states indices — no shift."""
+def test_sam2_2d_features_are_block_indexed() -> None:
+    """SAM2 uses the same block convention, reading base-plus Stage 3."""
     model = _stub_model(n_states=25)  # 24 Hiera blocks + patch embedding
-    layer_indices = (6, 11, 16, 21)
+    layer_indices = (5, 10, 15, 20)
 
     feats = extract_sam2_2d_features(
         model,
@@ -144,22 +141,28 @@ def test_sam2_2d_features_use_raw_hidden_state_indices() -> None:
         grid_size=GRID,
     )
 
+    # Same hidden_states entries the old hidden_states-indexed config read.
     assert _layer_values(feats, len(layer_indices)) == [6.0, 11.0, 16.0, 21.0]
 
 
-def test_sam_volume_features_offset_zero_matches_sam2() -> None:
-    """The shared 3D extractor must not shift SAM2 out of Stage 3."""
-    model = _stub_model(n_states=25)
+# Stage 3 block spans, from the empirically verified table in
+# documents/prompts/sam2_decisions.md (converted to block indices).
+SAM2_STAGE3_BLOCKS = {
+    "facebook/sam2.1-hiera-tiny": (3, 9),
+    "facebook/sam2.1-hiera-small": (3, 13),
+    "facebook/sam2.1-hiera-base-plus": (5, 20),
+    "facebook/sam2.1-hiera-large": (8, 43),
+}
 
-    features, _, _ = extract_sam_volume_features(
-        model,
-        _stub_processor,
-        torch.zeros(1, 8, 8, 1),
-        (6, 21),
-        target_depth=1,
-        grid_size=GRID,
-        hidden_state_offset=0,
-    )
 
-    assert features["layer_6"].unique().item() == 6.0
-    assert features["layer_21"].unique().item() == 21.0
+def test_sam2_configs_stay_inside_stage_3() -> None:
+    """All four indices must share Stage 3's channel count and resolution."""
+    assert set(SAM2_CONFIGS) == set(SAM2_STAGE3_BLOCKS)
+    for model_id, cfg in SAM2_CONFIGS.items():
+        lo, hi = SAM2_STAGE3_BLOCKS[model_id]
+        indices = cfg["layer_indices"]
+        assert all(lo <= i <= hi for i in indices), (
+            f"{model_id}: layer_indices {indices} leave Stage 3 (blocks {lo}-{hi})"
+        )
+        # The last entry should be Stage 3's final block.
+        assert max(indices) == hi
