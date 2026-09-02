@@ -238,6 +238,10 @@ def main() -> None:
     backbone, config = load_backbone(args.backbone, device, **backbone_kwargs)
     embed_dim = config["embed_dim"]
     layer_indices = tuple(config.get("layer_indices", (3, 6, 9, 11)))
+    # SAM v1 layer_indices are block indices (offset 1); SAM2's are already
+    # hidden_states indices (offset 0).  One extractor serves both, so the
+    # convention has to travel with the backbone metadata.
+    hidden_state_offset = int(config.get("hidden_state_offset", 0))
 
     # Determine which layers to use for probe
     if args.use_layers is not None:
@@ -251,7 +255,7 @@ def main() -> None:
         use_layers = layer_indices
 
     print(f"Embed dim: {embed_dim}")
-    print(f"Cache layer indices: {layer_indices}")
+    print(f"Cache layer indices: {layer_indices} (+{hidden_state_offset} offset)")
     print(f"Probe layer indices: {use_layers}")
 
     # ── Load datasets ──
@@ -298,6 +302,7 @@ def main() -> None:
                 cache_dir / "train",
                 layer_indices,
                 device,
+                hidden_state_offset=hidden_state_offset,
             )
             val_manifest = cache_sam_volume_features(
                 backbone,
@@ -306,6 +311,7 @@ def main() -> None:
                 cache_dir / "val",
                 layer_indices,
                 device,
+                hidden_state_offset=hidden_state_offset,
             )
             test_manifest = cache_sam_volume_features(
                 backbone,
@@ -314,6 +320,7 @@ def main() -> None:
                 cache_dir / "test",
                 layer_indices,
                 device,
+                hidden_state_offset=hidden_state_offset,
             )
     else:
         # 2D slice caching
@@ -554,6 +561,7 @@ def main() -> None:
             "decoder": args.decoder,
             "embed_dim": embed_dim,
             "cache_layers": list(layer_indices),
+            "hidden_state_offset": hidden_state_offset,
             "probe_layers": list(use_layers),
             "lr": args.lr,
             "weight_decay": args.weight_decay,

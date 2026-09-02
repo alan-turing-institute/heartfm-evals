@@ -116,5 +116,12 @@ DINOv3 backbones are re-exported by [models/dinov3/hubconf.py](models/dinov3/hub
   and `sam2` (2.1 Hiera, `SAM2_CONFIGS`). SAM2 segmentation reads Stage 3 (`embed_dim`);
   SAM2 classification reads Stage 4 (`cls_embed_dim`). Neither family has a CLS token, so
   both are `--pooling gap` only. See [prompts/sam2_decisions.md](prompts/sam2_decisions.md).
+- **The two SAM families index `layer_indices` differently.** `hidden_states[0]` is the patch
+  embedding, so block *i* is at `hidden_states[i+1]`. `SAM_CONFIGS` indices are **block**
+  indices (offset 1); `SAM2_CONFIGS` indices are already **`hidden_states`** indices (offset 0,
+  chosen so all four land in Stage 3 — shifting them changes the channel count).
+  `extract_sam_volume_features` serves both families and so takes a required
+  `hidden_state_offset`, carried in `load_backbone` metadata. Route every read through
+  `features.py::_select_hidden_state` rather than subscripting `hidden_states` directly.
 - Results files are committed and feed the analysis scripts: regenerate summaries after new runs, keep the `{name}_{timestamp}` convention.
 - Prefer cardiac-specific approaches over general-purpose image processing where the repo already has one.

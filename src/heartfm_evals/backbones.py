@@ -43,15 +43,22 @@ DINOV3_CONFIGS: dict[str, dict[str, Any]] = {
 }
 
 # ── SAM v1 ViT configs ───────────────────────────────────────────────────────
-# hidden_states from transformers includes the initial patch embedding as
-# index 0, so hidden_states[i+1] is the output of block i.  Unlike SAM2's Hiera
-# encoder, the SAM v1 ViT is uniform: every block emits the same channel count
-# at 64x64, so ``layer_indices`` is just evenly spaced quartiles of the depth.
+# ``layer_indices`` here are **block** indices: 0-based, so the last block of a
+# 12-block ViT is 11.  hidden_states from transformers includes the initial patch
+# embedding as index 0, so hidden_states[i+1] is the output of block i, and the
+# extractors in features.py apply that +1 themselves (``hidden_state_offset=1``,
+# supplied via the loader metadata below).  Contrast SAM2_CONFIGS, whose indices
+# are already hidden_states indices — see features.py::_select_hidden_state.
+#
+# Unlike SAM2's Hiera encoder the SAM v1 ViT is uniform: every block emits the
+# same channel count at 64x64, so ``layer_indices`` is just spread through the
+# depth, chosen to match DINOV3_CONFIGS at equal depth so that SAM and DINOv3
+# read the same relative depths.
 SAM_CONFIGS: dict[str, dict[str, Any]] = {
     "facebook/sam-vit-base": {
         "embed_dim": 768,
         "n_layers": 12,
-        "layer_indices": (2, 5, 8, 11),
+        "layer_indices": (3, 6, 9, 11),
     },
     "facebook/sam-vit-large": {
         "embed_dim": 1024,
@@ -263,6 +270,9 @@ def _load_sam(
         "embed_dim": embed_dim,
         "n_layers": cfg["n_layers"],
         "layer_indices": cfg["layer_indices"],
+        # SAM_CONFIGS layer_indices are block indices, so +1 to reach the
+        # matching hidden_states entry (index 0 is the patch embedding).
+        "hidden_state_offset": 1,
         "sam_image_processor": processor,
     }
 
@@ -292,5 +302,8 @@ def _load_sam2(
         "embed_dim": cfg["embed_dim"],
         "cls_embed_dim": cfg["cls_embed_dim"],
         "layer_indices": cfg["layer_indices"],
+        # SAM2_CONFIGS layer_indices are already hidden_states indices, chosen so
+        # that all four land inside Stage 3 — no shift.
+        "hidden_state_offset": 0,
         "sam2_processor": processor,
     }
