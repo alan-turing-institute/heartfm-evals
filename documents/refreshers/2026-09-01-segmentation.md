@@ -294,6 +294,10 @@ rows (they sort to the end with a NaN order key), so the CSV and the PNGs disagr
 groups — or minimally add `"SAM"` to both dicts.
 
 **N2 — SAM layer indices are off by one relative to DINOv3, so SAM never sees its final block.**
+> **Resolved 2026-09-02 — see issue #66.** `SAM_CONFIGS` indices are now block indices with
+> the `+1` applied at read time (base moved to `(3, 6, 9, 11)`); SAM2 was verified *not* to
+> have this bug and is unchanged. The analysis below is kept as the original record.
+
 `backbones.py` documents that `hidden_states[i+1]` is the output of block `i`, but
 `extract_sam_2d_features` / `extract_sam_volume_features` index `hidden_states[idx]` with the raw
 `layer_indices`. Verified empirically on `facebook/sam-vit-base` (transformers 5.5.3): 13 hidden

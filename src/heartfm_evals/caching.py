@@ -254,7 +254,7 @@ def cache_sam_volume_features(
     processor,
     cinema_dataset,
     cache_dir: Path,
-    layer_indices: tuple[int, ...] = (2, 5, 8, 11),
+    layer_indices: tuple[int, ...] = (3, 6, 9, 11),
     device: torch.device | None = None,
     target_depth: int = SAX_TARGET_DEPTH,
     grid_size: int = GRID_SIZE,

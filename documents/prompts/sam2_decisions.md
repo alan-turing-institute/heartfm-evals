@@ -27,6 +27,16 @@ segmentation multi-scale change that was ultimately **not** adopted.
 > as a side effect of adding SAM2 classification.
 >
 > Section 7 is retained because the Hiera stage analysis in it is correct and useful.
+>
+> **Index convention changed (issue #66).** Every `layer_indices` in this document is written
+> in the original **`hidden_states` position** form. `SAM2_CONFIGS` now stores **block**
+> indices, one lower, with the `+1` applied at read time by
+> `features.py::_block_hidden_state` — the same convention as `SAM_CONFIGS` and
+> `DINOV3_CONFIGS`. **The blocks read are unchanged**, so the analysis and the committed
+> `results/segmentation/*/sam2_*` numbers all still hold; only the stored numbers moved:
+> `(4, 6, 8, 10)` → `(3, 5, 7, 9)`, `(4, 7, 11, 14)` → `(3, 6, 10, 13)`,
+> `(6, 11, 16, 21)` → `(5, 10, 15, 20)`, `(9, 21, 33, 44)` → `(8, 20, 32, 43)`.
+> The stage tables below stay in `hidden_states` positions, which is what they were verified in.
 
 ---
 

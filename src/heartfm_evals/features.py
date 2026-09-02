@@ -22,6 +22,33 @@ from heartfm_evals.constants import (
 )
 
 
+# ── hidden_states indexing ─────────────────────────────────────────────────────
+def _block_hidden_state(
+    hidden_states: tuple[torch.Tensor, ...],
+    block_idx: int,
+) -> torch.Tensor:
+    """Return the output of transformer block *block_idx*.
+
+    ``hidden_states[0]`` is the initial patch embedding, so block *i*'s output is
+    at ``hidden_states[i+1]``.  Every ``layer_indices`` in this codebase —
+    ``SAM_CONFIGS``, ``SAM2_CONFIGS``, ``DINOV3_CONFIGS`` — is a block index, and
+    this is the only place that +1 is applied.
+
+    Raises:
+        IndexError: If the block does not exist, with a message naming both the
+            block index and the resolved ``hidden_states`` position.
+    """
+    pos = block_idx + 1
+    if not 0 <= pos < len(hidden_states):
+        msg = (
+            f"block index {block_idx} resolves to hidden_states[{pos}], but the "
+            f"encoder returned {len(hidden_states)} hidden states, i.e. blocks "
+            f"0..{len(hidden_states) - 2}."
+        )
+        raise IndexError(msg)
+    return hidden_states[pos]
+
+
 # ── Preprocessing ──────────────────────────────────────────────────────────────
 def preprocess_slice(image_2d: torch.Tensor) -> torch.Tensor:
     """Prepare a (H, W) [0,1] tensor for DINOv3.  Returns (1, 3, H, W)."""
@@ -219,7 +246,7 @@ def extract_sam_volume_features(
         sam_model: Frozen ``SamModel`` or ``Sam2Model`` in eval mode.
         processor: ``SamImageProcessor`` / ``Sam2Processor`` for pre-processing.
         sax_volume: ``(1, H, W, z)`` tensor in [0, 1].
-        layer_indices: Which intermediate ViT layers to extract.
+        layer_indices: Which intermediate ViT blocks to extract.
         device: Device for inference.
         target_depth: Pad z to this depth.
         grid_size: Downsample spatial dims to this size (default 12).
@@ -253,7 +280,8 @@ def extract_sam_volume_features(
         hidden_states = enc_out.hidden_states
 
         for idx in layer_indices:
-            feat = hidden_states[idx]  # (1, h, w, C) — channels-last
+            feat = _block_hidden_state(hidden_states, idx)
+            # (1, h, w, C) — channels-last
             feat = feat.permute(0, 3, 1, 2)  # (1, C, h, w)
             # Downsample to match DINOv3 grid size
             feat = F.interpolate(
@@ -288,6 +316,8 @@ def extract_sam_2d_features(
     The 64x64 feature maps are downsampled to *grid_size* x *grid_size* and
     concatenated along the channel dimension.
 
+    *layer_indices* are block indices, read via :func:`_block_hidden_state`.
+
     Args:
         sam_model: Frozen ``SamModel`` in eval mode.
         processor: ``SamImageProcessor`` for pre-processing.
@@ -313,7 +343,8 @@ def extract_sam_2d_features(
 
     feats = []
     for idx in layer_indices:
-        feat = hidden_states[idx]  # (1, 64, 64, embed_dim)
+        feat = _block_hidden_state(hidden_states, idx)
+        # (1, 64, 64, embed_dim)
         feat = feat.permute(0, 3, 1, 2)  # (1, embed_dim, 64, 64)
         feat = F.interpolate(
             feat, size=(grid_size, grid_size), mode="bilinear", align_corners=False
@@ -406,7 +437,8 @@ def extract_sam2_2d_features(
 
     feats = []
     for idx in layer_indices:
-        feat = hidden_states[idx]  # (1, H', W', C)
+        feat = _block_hidden_state(hidden_states, idx)
+        # (1, H', W', C)
         feat = feat.permute(0, 3, 1, 2)  # (1, C, H', W')
         feat = F.interpolate(
             feat, size=(grid_size, grid_size), mode="bilinear", align_corners=False
