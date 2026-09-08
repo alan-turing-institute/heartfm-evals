@@ -1,8 +1,6 @@
 #!/usr/bin/env bash
 # Extract and cache features for every model x dataset x task, without training.
 #
-# SAM2 is deliberately excluded -- SAM v1 only.
-#
 # Enumerates *cache keys*, not experiments, because several experiments share one
 # cache:
 #
@@ -13,7 +11,7 @@
 #   classification  logreg and finetune read the same cache, so only
 #                 --eval-mode logreg is run.  Both are per (model, pooling).
 #
-# That makes 75 runs instead of the 141 the full experiment grid would need:
+# That makes 75 runs instead of the 129 the full experiment grid would need:
 #
 #   segmentation    7 models x 2 cache families x 3 datasets = 42
 #   classification  11 keys              x 3 datasets        = 33
@@ -78,7 +76,6 @@ for backbone in $BACKBONES; do
         dinov3 | cinema | sam) ;;
         *)
             echo "Unknown backbone: $backbone (expected 'dinov3', 'cinema' or 'sam')" >&2
-            echo "Note: SAM2 is deliberately not supported by this script." >&2
             exit 2
             ;;
     esac

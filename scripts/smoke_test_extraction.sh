@@ -4,7 +4,7 @@
 # Two lanes, because extraction and training have very different minimum-patient
 # needs:
 #
-#   Lane A (default) — --cache-only extraction for all 102 cache keys at
+#   Lane A (default) — --cache-only extraction for all 75 cache keys at
 #     MAX_PATIENTS_EXTRACT patients.  No labels are needed, so a couple of
 #     patients is enough.  This is the dataset x model x task sweep.
 #     ACDC has no val split, so a couple of patients are carved out of train --
@@ -13,7 +13,7 @@
 #   Lane B (TRAIN=1) — one short training run per model on ACDC only, to prove
 #     the decoders/probes actually consume the new caches.  Extraction alone
 #     cannot catch a decoder shape mismatch, which is the real risk in the
-#     never-before-run SAM1-segmentation and SAM2-classification paths.
+#     never-before-run SAM1-segmentation path.
 #     Classification needs many more patients here: the pathology label *is* the
 #     target, and ACDC's 10-fold stratified CV needs >=10 patients per class.
 #     --max-patients is stratified by pathology (plain head() would give ACDC only
@@ -56,12 +56,6 @@ CLS="scripts/classification/run_classification.py"
 DINO_MODELS=(dinov3_vits16 dinov3_vitb16 dinov3_vitl16)
 # SAM v1 checkpoints.
 SAM_MODELS=(facebook/sam-vit-base facebook/sam-vit-large facebook/sam-vit-huge)
-# SAM2 checkpoints.  hiera-tiny is excluded — nothing in results/ uses it.
-SAM2_MODELS=(
-    facebook/sam2.1-hiera-small
-    facebook/sam2.1-hiera-base-plus
-    facebook/sam2.1-hiera-large
-)
 
 n_pass=0
 n_fail=0
@@ -110,19 +104,10 @@ for dataset in $DATASETS; do
                 --cache-only --max-patients "$MAX_PATIENTS_EXTRACT" \
                 --cache-dir "$CACHE_ROOT/seg/$dataset/$tag/$decoder"
         done
-
-        for model in "${SAM2_MODELS[@]}"; do
-            tag="${model##*/}"
-            run "extract seg $dataset sam2/$tag $decoder" \
-                "$PYTHON" "$SEG" --dataset "$dataset" --backbone sam2 \
-                --sam2-model-id "$model" --decoder "$decoder" \
-                --cache-only --max-patients "$MAX_PATIENTS_EXTRACT" \
-                --cache-dir "$CACHE_ROOT/seg/$dataset/$tag/$decoder"
-        done
     done
 
     # Classification: logreg and finetune share one cache, so extract once per
-    # (model, pooling).  Both SAM families are gap-only (no CLS token).
+    # (model, pooling).  SAM v1 is gap-only (no CLS token).
     for pooling in cls gap; do
         for model in "${DINO_MODELS[@]}"; do
             run "extract cls $dataset dinov3/$model $pooling" \
@@ -144,15 +129,6 @@ for dataset in $DATASETS; do
         run "extract cls $dataset sam/$tag gap" \
             "$PYTHON" "$CLS" --dataset "$dataset" --backbone sam \
             --sam-model-id "$model" --eval-mode logreg --pooling gap \
-            --cache-only --max-patients "$MAX_PATIENTS_EXTRACT" \
-            --cls-cache-dir "$CACHE_ROOT/cls/$dataset/$tag/gap"
-    done
-
-    for model in "${SAM2_MODELS[@]}"; do
-        tag="${model##*/}"
-        run "extract cls $dataset sam2/$tag gap" \
-            "$PYTHON" "$CLS" --dataset "$dataset" --backbone sam2 \
-            --sam2-model-id "$model" --eval-mode logreg --pooling gap \
             --cache-only --max-patients "$MAX_PATIENTS_EXTRACT" \
             --cls-cache-dir "$CACHE_ROOT/cls/$dataset/$tag/gap"
     done
@@ -187,15 +163,6 @@ if [[ "$TRAIN" == "1" ]]; then
                 --max-patients "$MAX_PATIENTS_SEG_TRAIN" --n-epochs 1 --patience 1 \
                 --cache-dir "$CACHE_ROOT/segtrain/$tag" --output-dir "$OUT/segmentation/acdc"
         done
-
-        for model in "${SAM2_MODELS[@]}"; do
-            tag="${model##*/}"
-            run "train seg sam2/$tag $decoder" \
-                "$PYTHON" "$SEG" --dataset acdc --backbone sam2 --sam2-model-id "$model" \
-                --decoder "$decoder" \
-                --max-patients "$MAX_PATIENTS_SEG_TRAIN" --n-epochs 1 --patience 1 \
-                --cache-dir "$CACHE_ROOT/segtrain/$tag" --output-dir "$OUT/segmentation/acdc"
-        done
     done
 
     # Classification needs enough patients for stratified CV over all classes.
@@ -221,15 +188,6 @@ if [[ "$TRAIN" == "1" ]]; then
         tag="${model##*/}"
         run "train cls sam/$tag gap" \
             "$PYTHON" "$CLS" --dataset acdc --backbone sam --sam-model-id "$model" \
-            --eval-mode logreg --pooling gap --max-patients "$MAX_PATIENTS_CLS_TRAIN" \
-            --cls-cache-dir "$CACHE_ROOT/clstrain/$tag/gap" \
-            --output-dir "$OUT/classification/acdc"
-    done
-
-    for model in "${SAM2_MODELS[@]}"; do
-        tag="${model##*/}"
-        run "train cls sam2/$tag gap" \
-            "$PYTHON" "$CLS" --dataset acdc --backbone sam2 --sam2-model-id "$model" \
             --eval-mode logreg --pooling gap --max-patients "$MAX_PATIENTS_CLS_TRAIN" \
             --cls-cache-dir "$CACHE_ROOT/clstrain/$tag/gap" \
             --output-dir "$OUT/classification/acdc"
