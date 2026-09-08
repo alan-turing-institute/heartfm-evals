@@ -21,14 +21,13 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-from scipy.stats import binomtest
-from sklearn.metrics import f1_score
-
 from _common import (
     align_and_validate_classifiers,
     load_classifiers,
     plot_pvalue_heatmap,
 )
+from scipy.stats import binomtest
+from sklearn.metrics import f1_score
 
 
 def mcnemar_pairwise(
@@ -82,14 +81,16 @@ def summarise_significant(
         for j in range(i + 1, len(names)):
             p = pvals.iloc[i, j]
             if p < alpha:
-                rows.append({
-                    "classifier_a": names[i],
-                    "classifier_b": names[j],
-                    "acc_a": f"{accs[names[i]]:.4f}",
-                    "acc_b": f"{accs[names[j]]:.4f}",
-                    "discordant": info.iloc[i, j],
-                    "p_value": f"{p:.6f}",
-                })
+                rows.append(
+                    {
+                        "classifier_a": names[i],
+                        "classifier_b": names[j],
+                        "acc_a": f"{accs[names[i]]:.4f}",
+                        "acc_b": f"{accs[names[j]]:.4f}",
+                        "discordant": info.iloc[i, j],
+                        "p_value": f"{p:.6f}",
+                    }
+                )
     return pd.DataFrame(rows)
 
 
@@ -110,7 +111,8 @@ def main():
         dataset_dirs = [args.results_dir / args.dataset]
     else:
         dataset_dirs = sorted(
-            d for d in args.results_dir.iterdir()
+            d
+            for d in args.results_dir.iterdir()
             if d.is_dir() and list(d.glob("*.json"))
         )
 
@@ -127,8 +129,10 @@ def main():
 
         classifiers = align_and_validate_classifiers(classifiers)
 
-        print(f"  Loaded {len(classifiers)} classifiers, "
-              f"{len(next(iter(classifiers.values()))['true_labels'])} samples")
+        print(
+            f"  Loaded {len(classifiers)} classifiers, "
+            f"{len(next(iter(classifiers.values()))['true_labels'])} samples"
+        )
 
         pvals, info = mcnemar_pairwise(classifiers)
 
