@@ -294,9 +294,21 @@ rows (they sort to the end with a NaN order key), so the CSV and the PNGs disagr
 groups — or minimally add `"SAM"` to both dicts.
 
 **N2 — SAM layer indices are off by one relative to DINOv3, so SAM never sees its final block.**
-> **Resolved 2026-09-02 — see issue #66.** `SAM_CONFIGS` indices are now block indices with
-> the `+1` applied at read time (base moved to `(3, 6, 9, 11)`); SAM2 was verified *not* to
-> have this bug and is unchanged. The analysis below is kept as the original record.
+> **Resolved 2026-09-08 — see issue #66 / PR #67.** `SAM_CONFIGS` indices are now **block**
+> indices, with the `+1` applied at read time by `features.py::_block_hidden_state`. All three
+> SAM v1 tuples are unchanged in value — they are each model's `global_attn_indexes`, which the
+> analysis below wrongly read as "quartiles" — so base stays `(2, 5, 8, 11)` but now means
+> blocks 2/5/8/11, read at `hidden_states[3, 6, 9, 12]`. This also makes the bug worse than
+> stated below: pre-fix the four taps were blocks 1/4/7/10, **all windowed**, so no decoder tap
+> ever saw a globally-attended feature map.
+>
+> **Cache hygiene:** because the numbers did not change, the cache tag is still
+> `layers_2-5-8-11` while its contents now differ. Nothing detects that — delete pre-fix SAM v1
+> caches by hand, **including on Isambard-AI**, rather than relying on the tag.
+>
+> SAM2 was verified *not* to have this bug; its indices were renumbered down by one so both
+> families share the block convention, and the blocks read are byte-identical. The analysis
+> below is kept as the original record.
 
 `backbones.py` documents that `hidden_states[i+1]` is the output of block `i`, but
 `extract_sam_2d_features` / `extract_sam_volume_features` index `hidden_states[idx]` with the raw

@@ -120,8 +120,11 @@ DINOv3 backbones are re-exported by [models/dinov3/hubconf.py](models/dinov3/hub
   `SAM2_CONFIGS` alike. `hidden_states[0]` is the patch embedding, so block *i* is read at
   `hidden_states[i+1]`, and `features.py::_block_hidden_state` is the only place that `+1` is
   applied. Never subscript `hidden_states` directly — that is what made SAM v1 skip its final
-  block (issue #66). SAM2's four indices must all stay inside Stage 3, whose per-model block
-  span is commented beside each `SAM2_CONFIGS` entry; leaving Stage 3 changes the channel count
-  and breaks the decoder.
+  block (issue #66). The values themselves are not arbitrary depths: `SAM_CONFIGS` holds each
+  model's **global-attention blocks** (`global_attn_indexes` — the only ones attending across the
+  full 64×64 grid, the rest being 14×14 windowed), so don't "tidy" them into even quartiles.
+  SAM2's four indices must all stay inside Stage 3, whose per-model block span is commented
+  beside each `SAM2_CONFIGS` entry; leaving Stage 3 changes the channel count and breaks the
+  decoder.
 - Results files are committed and feed the analysis scripts: regenerate summaries after new runs, keep the `{name}_{timestamp}` convention.
 - Prefer cardiac-specific approaches over general-purpose image processing where the repo already has one.

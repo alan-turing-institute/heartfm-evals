@@ -78,6 +78,25 @@ def test_block_hidden_state_out_of_range() -> None:
 
 # ── SAM v1 ────────────────────────────────────────────────────────────────────
 
+# Each model's ``global_attn_indexes`` — the blocks with ``window_size=0``, i.e.
+# the only ones attending across the whole 64x64 grid.  Hardcoded rather than read
+# off a checkpoint because this suite loads no weights.
+SAM_GLOBAL_ATTN_BLOCKS = {
+    "facebook/sam-vit-base": (2, 5, 8, 11),
+    "facebook/sam-vit-large": (5, 11, 17, 23),
+    "facebook/sam-vit-huge": (7, 15, 23, 31),
+}
+
+
+def test_sam_v1_configs_are_global_attention_blocks() -> None:
+    """Guards against the indices drifting back to plain even quartiles."""
+    assert set(SAM_CONFIGS) == set(SAM_GLOBAL_ATTN_BLOCKS)
+    for model_id, cfg in SAM_CONFIGS.items():
+        assert tuple(cfg["layer_indices"]) == SAM_GLOBAL_ATTN_BLOCKS[model_id], (
+            f"{model_id}: layer_indices {cfg['layer_indices']} are not the "
+            f"global-attention blocks {SAM_GLOBAL_ATTN_BLOCKS[model_id]}"
+        )
+
 
 def test_sam_v1_configs_reach_their_final_block() -> None:
     """Under the block-index convention, the last entry is the final block."""
@@ -93,7 +112,7 @@ def test_sam_v1_configs_reach_their_final_block() -> None:
 def test_sam_2d_features_read_blocks_not_raw_hidden_states() -> None:
     """``layer_indices`` are block indices, so entry i is read at hs[i+1]."""
     model = _stub_model(n_states=13)  # 12 blocks + patch embedding
-    layer_indices = (3, 6, 9, 11)
+    layer_indices = SAM_GLOBAL_ATTN_BLOCKS["facebook/sam-vit-base"]
 
     feats = extract_sam_2d_features(
         model,
@@ -104,7 +123,8 @@ def test_sam_2d_features_read_blocks_not_raw_hidden_states() -> None:
     )
 
     assert feats.shape == (8 * len(layer_indices), GRID, GRID)
-    assert _layer_values(feats, len(layer_indices)) == [4.0, 7.0, 10.0, 12.0]
+    # (2, 5, 8, 11) -> hs[3, 6, 9, 12]; the old code read hs[2, 5, 8, 11].
+    assert _layer_values(feats, len(layer_indices)) == [3.0, 6.0, 9.0, 12.0]
 
 
 def test_sam_volume_features_apply_offset() -> None:

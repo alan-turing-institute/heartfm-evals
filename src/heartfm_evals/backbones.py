@@ -48,15 +48,23 @@ DINOV3_CONFIGS: dict[str, dict[str, Any]] = {
 # initial patch embedding as index 0, so block i is read at hidden_states[i+1];
 # features.py::_block_hidden_state is the only place that +1 is applied.
 #
+# The values below are each model's ``global_attn_indexes`` — **not** arbitrary
+# depths, and **not** to be "tidied" into even quartiles.  SAM's encoder runs at
+# 1024x1024 with patch 16, i.e. 64x64 = 4096 tokens, so full self-attention is
+# paid for only four times: those blocks have ``window_size=0`` and attend across
+# the whole grid, while every other block is restricted to 14x14 = 196-token
+# windows.  Tapping a windowed block yields window-limited features, so these are
+# the natural extraction points.  ``layer_indices[-1]`` is both the final block
+# and a global one, so ``linear_probe`` (which uses only the last entry) gets a
+# globally-attended tap.
+#
 # Unlike SAM2's Hiera encoder the SAM v1 ViT is uniform: every block emits the
-# same channel count at 64x64, so ``layer_indices`` is just spread through the
-# depth, chosen to match DINOV3_CONFIGS at equal depth so that SAM and DINOv3
-# read the same relative depths.
+# same channel count at 64x64, so all four taps are directly concatenable.
 SAM_CONFIGS: dict[str, dict[str, Any]] = {
     "facebook/sam-vit-base": {
         "embed_dim": 768,
         "n_layers": 12,
-        "layer_indices": (3, 6, 9, 11),
+        "layer_indices": (2, 5, 8, 11),
     },
     "facebook/sam-vit-large": {
         "embed_dim": 1024,
