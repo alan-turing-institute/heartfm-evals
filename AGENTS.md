@@ -15,7 +15,7 @@ Research-oriented — **not** production medical device software.
 | Axis | Values |
 | --- | --- |
 | **Tasks** | segmentation (per-pixel RV/MYO/LV), classification (patient-level pathology) |
-| **Backbones** | `dinov3` (self-supervised ViT), `sam` (SAM v1, supervised ViT), `sam2` (SAM 2.1 Hiera), `cinema` (cardiac-MRI MAE, 3D) — all four work for **both** tasks |
+| **Backbones** | `dinov3` (self-supervised ViT), `sam` (SAM v1, supervised ViT), `cinema` (cardiac-MRI MAE, 3D) — all three work for **both** tasks |
 | **Datasets** | `acdc`, `mnm` (M&Ms), `mnm2` (M&Ms-2) |
 | **Segmentation decoders** | `linear_probe` (1×1 conv, DINOv3 protocol), `conv_decoder` (2D CNN), `unetr` (3D UNetR on stacked features) |
 | **Classification modes** | `logreg` (linear probe on frozen features), `finetune` (linear head, backbone frozen by default) |
@@ -38,14 +38,14 @@ Research-oriented — **not** production medical device software.
 - [models/dinov3/](models/dinov3/) — vendored DINOv3 hub code (**DINOv3 license**)
 - [model_weights/](model_weights/) — checkpoints; HF downloads to `model_weights/hf`
 - [notebooks/](notebooks/) — exploratory, largely superseded by `scripts/`
-- [prompts/](prompts/) — design/decision records
+- [documents/prompts/](documents/prompts/) — design/decision records
 - [documents/refreshers/](documents/refreshers/) — dated walkthroughs of how a pipeline
   actually works; more current than prose elsewhere when the two disagree
 
 ## Entry points
 
 One unified script per task — extend the library and the `choices=`, never fork a script
-per backbone/decoder (that duplication is what `prompts/restructuring_plan.md` removed).
+per backbone/decoder (that duplication is what `documents/prompts/restructuring_plan.md` removed).
 
 ```bash
 python scripts/segmentation/run_segmentation.py \
@@ -98,7 +98,7 @@ DINOv3 backbones are re-exported by [models/dinov3/hubconf.py](models/dinov3/hub
 
 `main` is default; several topic branches are kept as records, not work to merge.
 
-- `sam2-classification` — **most active, ahead of `main`**: SAM v1 replaces SAM2 in the drivers, plus new plotting/aggregation scripts and regenerated results. Check here before assuming `main` is current.
+- `sam2-classification` — a historical record, now **behind** this line of work: it was the first branch to replace SAM2 with SAM v1 in the drivers, plus new plotting/aggregation scripts and regenerated results. Draft PR #63. SAM2 has since been removed outright (see [documents/prompts/sam2_decisions.md](documents/prompts/sam2_decisions.md)), so prefer `main`.
 - `isambard-ai`, `profiling` — HPC batch scripts, feature-extraction profiling
 - `sign_tests_classification`, `classification_on_spark` — significance testing, largely landed in `main`
 - `add_multiple_datasets`, `fine-tunning`, `10-unet-decoder`, `5-decoder-dense-segmentation`, `9-dino-for-linear-probe-classification`, `35-segmentation---adapt-the-dino-segmentation-head` — pre-refactor issue branches (segmentation was ACDC-only, one script per backbone/decoder)
@@ -112,13 +112,13 @@ DINOv3 backbones are re-exported by [models/dinov3/hubconf.py](models/dinov3/hub
   experiments share one cache (both 2D decoders; `logreg` + `finetune`), so extract per
   *cache key*, not per experiment. `--max-patients` limits patients for smoke tests —
   stratified by pathology for classification, plain `head()` for segmentation.
-- SAM has two families with separate caches and configs: `sam` (v1 ViT, `SAM_CONFIGS`)
-  and `sam2` (2.1 Hiera, `SAM2_CONFIGS`). SAM2 segmentation reads Stage 3 (`embed_dim`);
-  SAM2 classification reads Stage 4 (`cls_embed_dim`). Neither family has a CLS token, so
-  both are `--pooling gap` only. See [prompts/sam2_decisions.md](prompts/sam2_decisions.md).
-- **`layer_indices` are always block indices** — `DINOV3_CONFIGS`, `SAM_CONFIGS` and
-  `SAM2_CONFIGS` alike. How a block index is *resolved* differs by family, though. Both SAM
-  families go through `vision_encoder(..., output_hidden_states=True)`, whose tuple starts with
+- SAM v1 (`sam`, `SAM_CONFIGS`) has no CLS token, so it is `--pooling gap` only. SAM2
+  (2.1 Hiera) was removed on 2026-09-08 — the rationale and what the removal touched are
+  in [documents/prompts/sam2_decisions.md](documents/prompts/sam2_decisions.md), and the
+  last state containing it is the tag `archive/sam2-2026-09-08`.
+- **`layer_indices` are always block indices** — `DINOV3_CONFIGS` and `SAM_CONFIGS` alike.
+  How a block index is *resolved* differs by family, though. SAM v1 goes through
+  `vision_encoder(..., output_hidden_states=True)`, whose tuple starts with
   the patch embedding, so block *i* sits at `hidden_states[i+1]`; `features.py::_block_hidden_state`
   is the only place that `+1` is applied, and never subscript `hidden_states` directly — that is
   what made SAM v1 skip its final block (issue #66). DINOv3 has no `hidden_states` tuple: it uses
@@ -127,8 +127,5 @@ DINOv3 backbones are re-exported by [models/dinov3/hubconf.py](models/dinov3/hub
   values themselves are not arbitrary depths: `SAM_CONFIGS` holds each
   model's **global-attention blocks** (`global_attn_indexes` — the only ones attending across the
   full 64×64 grid, the rest being 14×14 windowed), so don't "tidy" them into even quartiles.
-  SAM2's four indices must all stay inside Stage 3, whose per-model block span is commented
-  beside each `SAM2_CONFIGS` entry; leaving Stage 3 changes the channel count and breaks the
-  decoder.
 - Results files are committed and feed the analysis scripts: regenerate summaries after new runs, keep the `{name}_{timestamp}` convention.
 - Prefer cardiac-specific approaches over general-purpose image processing where the repo already has one.

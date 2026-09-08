@@ -38,17 +38,12 @@ training.
 | **CineMA** | 3D SAX volume | Masked autoencoder on 15M cine images    |
 | **DINOv3** | 2D slices     | Self-supervised (DINO) on natural images |
 | **SAM v1** | 2D slices     | Segment Anything on natural images       |
-| **SAM2**   | 2D slices     | Segment Anything 2 (Hiera) on natural images + video |
 
 All backbones produce one embedding vector per 2D slice (CineMA: per 3D
 volume). Patient-level features are obtained by mean-pooling ED and ES
 embeddings separately, then concatenating into a single vector. Two pooling
 modes are compared: CLS token (`cls`) and global average pooling (`gap`).
-Neither SAM family has a CLS token, so both support `gap` only.
-
-SAM2 pools its **Stage 4** (final) Hiera hidden state, whose width is
-`cls_embed_dim` (768/768/896/1152) rather than the Stage 3 `embed_dim` used for
-segmentation — see [../../prompts/sam2_decisions.md](../../prompts/sam2_decisions.md).
+SAM v1 has no CLS token, so it supports `gap` only.
 
 ## Evaluation Modes
 
@@ -92,9 +87,9 @@ python scripts/classification/build_summary.py
 | Option | Default | Description |
 | ------ | ------- | ----------- |
 | `--dataset` | `acdc` | Dataset: `acdc`, `mnm`, or `mnm2` |
-| `--backbone` | — | `cinema`, `dinov3`, `sam`, or `sam2` |
+| `--backbone` | — | `cinema`, `dinov3`, or `sam` |
 | `--eval-mode` | — | `logreg` or `finetune` |
-| `--pooling` | `cls` | `cls` or `gap` (`sam`/`sam2`: `gap` only) |
+| `--pooling` | `cls` | `cls` or `gap` (`sam`: `gap` only) |
 | `--freeze-backbone` / `--no-freeze-backbone` | frozen | Fine-tune mode only |
 | `--data-dir` | `../data/heartfm/processed/{dataset}` | Override data directory |
 | `--output-dir` | `results/classification/{dataset}` | Override output directory |
