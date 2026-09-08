@@ -2,7 +2,7 @@
 
 ``hidden_states[0]`` is the initial patch embedding, so block *i*'s output lives
 at ``hidden_states[i+1]``.  Every ``layer_indices`` in this codebase is a block
-index, and these tests pin that single convention down for both SAM families.
+index, and these tests pin that single convention down.
 
 All stubs are synthetic: no model weights or datasets are downloaded.
 """
@@ -14,10 +14,9 @@ from types import SimpleNamespace
 import pytest
 import torch
 
-from heartfm_evals.backbones import SAM2_CONFIGS, SAM_CONFIGS
+from heartfm_evals.backbones import SAM_CONFIGS
 from heartfm_evals.features import (
     _block_hidden_state,
-    extract_sam2_2d_features,
     extract_sam_2d_features,
     extract_sam_volume_features,
 )
@@ -35,7 +34,7 @@ def _hidden_states(
 
 
 class _StubEncoder:
-    """Stands in for a SAM/SAM2 vision encoder returning fixed hidden states."""
+    """Stands in for a SAM vision encoder returning fixed hidden states."""
 
     def __init__(self, n_states: int, channels: int = 8, spatial: int = 4):
         self.states = _hidden_states(n_states, channels, spatial)
@@ -143,46 +142,3 @@ def test_sam_volume_features_apply_offset() -> None:
     assert n_slices == 2
     assert features["layer_3"].unique().item() == 4.0
     assert features["layer_11"].unique().item() == 12.0  # final block, was skipped
-
-
-# ── SAM2 ──────────────────────────────────────────────────────────────────────
-
-
-def test_sam2_2d_features_are_block_indexed() -> None:
-    """SAM2 uses the same block convention, reading base-plus Stage 3."""
-    model = _stub_model(n_states=25)  # 24 Hiera blocks + patch embedding
-    layer_indices = (5, 10, 15, 20)
-
-    feats = extract_sam2_2d_features(
-        model,
-        _stub_processor,
-        torch.zeros(8, 8),
-        layer_indices,
-        grid_size=GRID,
-    )
-
-    # Same hidden_states entries the old hidden_states-indexed config read.
-    assert _layer_values(feats, len(layer_indices)) == [6.0, 11.0, 16.0, 21.0]
-
-
-# Stage 3 block spans, from the empirically verified table in
-# documents/prompts/sam2_decisions.md (converted to block indices).
-SAM2_STAGE3_BLOCKS = {
-    "facebook/sam2.1-hiera-tiny": (3, 9),
-    "facebook/sam2.1-hiera-small": (3, 13),
-    "facebook/sam2.1-hiera-base-plus": (5, 20),
-    "facebook/sam2.1-hiera-large": (8, 43),
-}
-
-
-def test_sam2_configs_stay_inside_stage_3() -> None:
-    """All four indices must share Stage 3's channel count and resolution."""
-    assert set(SAM2_CONFIGS) == set(SAM2_STAGE3_BLOCKS)
-    for model_id, cfg in SAM2_CONFIGS.items():
-        lo, hi = SAM2_STAGE3_BLOCKS[model_id]
-        indices = cfg["layer_indices"]
-        assert all(lo <= i <= hi for i in indices), (
-            f"{model_id}: layer_indices {indices} leave Stage 3 (blocks {lo}-{hi})"
-        )
-        # The last entry should be Stage 3's final block.
-        assert max(indices) == hi
