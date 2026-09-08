@@ -44,9 +44,11 @@ DINOV3_CONFIGS: dict[str, dict[str, Any]] = {
 
 # ── SAM v1 ViT configs ───────────────────────────────────────────────────────
 # ``layer_indices`` are **block** indices, 0-based — the one convention shared by
-# every backbone family here.  hidden_states from transformers includes the
-# initial patch embedding as index 0, so block i is read at hidden_states[i+1];
-# features.py::_block_hidden_state is the only place that +1 is applied.
+# every backbone family here.  How they are resolved differs: SAM v1 and SAM2 go
+# through transformers' hidden_states tuple, whose index 0 is the patch embedding,
+# so block i is read at hidden_states[i+1] via features.py::_block_hidden_state
+# (the only place that +1 is applied).  DINOv3 instead calls
+# get_intermediate_layers, which is block-indexed already and needs no shift.
 #
 # The values below are each model's ``global_attn_indexes`` — **not** arbitrary
 # depths, and **not** to be "tidied" into even quartiles.  SAM's encoder runs at
@@ -79,8 +81,9 @@ SAM_CONFIGS: dict[str, dict[str, Any]] = {
 }
 
 # ── SAM 2.1 Hiera configs ────────────────────────────────────────────────────
-# ``layer_indices`` are **block** indices, as for SAM v1 and DINOv3 — block i is
-# read at hidden_states[i+1] by features.py::_block_hidden_state.
+# ``layer_indices`` are **block** indices, the convention shared with SAM v1 and
+# DINOv3.  As for SAM v1 — and unlike DINOv3, which has no hidden_states tuple —
+# block i is read at hidden_states[i+1] by features.py::_block_hidden_state.
 #
 # These were historically written as raw hidden_states positions, one higher than
 # the block they name; they were renumbered down by one when the shared block

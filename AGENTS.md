@@ -117,10 +117,14 @@ DINOv3 backbones are re-exported by [models/dinov3/hubconf.py](models/dinov3/hub
   SAM2 classification reads Stage 4 (`cls_embed_dim`). Neither family has a CLS token, so
   both are `--pooling gap` only. See [prompts/sam2_decisions.md](prompts/sam2_decisions.md).
 - **`layer_indices` are always block indices** — `DINOV3_CONFIGS`, `SAM_CONFIGS` and
-  `SAM2_CONFIGS` alike. `hidden_states[0]` is the patch embedding, so block *i* is read at
-  `hidden_states[i+1]`, and `features.py::_block_hidden_state` is the only place that `+1` is
-  applied. Never subscript `hidden_states` directly — that is what made SAM v1 skip its final
-  block (issue #66). The values themselves are not arbitrary depths: `SAM_CONFIGS` holds each
+  `SAM2_CONFIGS` alike. How a block index is *resolved* differs by family, though. Both SAM
+  families go through `vision_encoder(..., output_hidden_states=True)`, whose tuple starts with
+  the patch embedding, so block *i* sits at `hidden_states[i+1]`; `features.py::_block_hidden_state`
+  is the only place that `+1` is applied, and never subscript `hidden_states` directly — that is
+  what made SAM v1 skip its final block (issue #66). DINOv3 has no `hidden_states` tuple: it uses
+  `get_intermediate_layers(n=list(layer_indices))`, which is already block-indexed and returns
+  only the requested blocks, so no shift applies. CineMA has no `layer_indices` at all. The
+  values themselves are not arbitrary depths: `SAM_CONFIGS` holds each
   model's **global-attention blocks** (`global_attn_indexes` — the only ones attending across the
   full 64×64 grid, the rest being 14×14 windowed), so don't "tidy" them into even quartiles.
   SAM2's four indices must all stay inside Stage 3, whose per-model block span is commented

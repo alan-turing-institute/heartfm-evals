@@ -29,10 +29,14 @@ def _block_hidden_state(
 ) -> torch.Tensor:
     """Return the output of transformer block *block_idx*.
 
-    ``hidden_states[0]`` is the initial patch embedding, so block *i*'s output is
-    at ``hidden_states[i+1]``.  Every ``layer_indices`` in this codebase —
-    ``SAM_CONFIGS``, ``SAM2_CONFIGS``, ``DINOV3_CONFIGS`` — is a block index, and
-    this is the only place that +1 is applied.
+    In a transformers ``hidden_states`` tuple, index 0 is the initial patch
+    embedding, so block *i*'s output is at ``hidden_states[i+1]``.  Both SAM
+    families store block indices in ``SAM_CONFIGS`` / ``SAM2_CONFIGS``, and this
+    is the only place that +1 is applied.
+
+    Only the SAM paths reach here.  DINOv3 also uses block indices but has no
+    ``hidden_states`` tuple — ``get_intermediate_layers`` is block-indexed
+    already — and CineMA has no ``layer_indices`` at all.
 
     Raises:
         IndexError: If the block does not exist, with a message naming both the
