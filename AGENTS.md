@@ -116,5 +116,19 @@ DINOv3 backbones are re-exported by [models/dinov3/hubconf.py](models/dinov3/hub
   and `sam2` (2.1 Hiera, `SAM2_CONFIGS`). SAM2 segmentation reads Stage 3 (`embed_dim`);
   SAM2 classification reads Stage 4 (`cls_embed_dim`). Neither family has a CLS token, so
   both are `--pooling gap` only. See [prompts/sam2_decisions.md](prompts/sam2_decisions.md).
+- **`layer_indices` are always block indices** — `DINOV3_CONFIGS`, `SAM_CONFIGS` and
+  `SAM2_CONFIGS` alike. How a block index is *resolved* differs by family, though. Both SAM
+  families go through `vision_encoder(..., output_hidden_states=True)`, whose tuple starts with
+  the patch embedding, so block *i* sits at `hidden_states[i+1]`; `features.py::_block_hidden_state`
+  is the only place that `+1` is applied, and never subscript `hidden_states` directly — that is
+  what made SAM v1 skip its final block (issue #66). DINOv3 has no `hidden_states` tuple: it uses
+  `get_intermediate_layers(n=list(layer_indices))`, which is already block-indexed and returns
+  only the requested blocks, so no shift applies. CineMA has no `layer_indices` at all. The
+  values themselves are not arbitrary depths: `SAM_CONFIGS` holds each
+  model's **global-attention blocks** (`global_attn_indexes` — the only ones attending across the
+  full 64×64 grid, the rest being 14×14 windowed), so don't "tidy" them into even quartiles.
+  SAM2's four indices must all stay inside Stage 3, whose per-model block span is commented
+  beside each `SAM2_CONFIGS` entry; leaving Stage 3 changes the channel count and breaks the
+  decoder.
 - Results files are committed and feed the analysis scripts: regenerate summaries after new runs, keep the `{name}_{timestamp}` convention.
 - Prefer cardiac-specific approaches over general-purpose image processing where the repo already has one.

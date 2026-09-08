@@ -43,10 +43,25 @@ DINOV3_CONFIGS: dict[str, dict[str, Any]] = {
 }
 
 # ── SAM v1 ViT configs ───────────────────────────────────────────────────────
-# hidden_states from transformers includes the initial patch embedding as
-# index 0, so hidden_states[i+1] is the output of block i.  Unlike SAM2's Hiera
-# encoder, the SAM v1 ViT is uniform: every block emits the same channel count
-# at 64x64, so ``layer_indices`` is just evenly spaced quartiles of the depth.
+# ``layer_indices`` are **block** indices, 0-based — the one convention shared by
+# every backbone family here.  How they are resolved differs: SAM v1 and SAM2 go
+# through transformers' hidden_states tuple, whose index 0 is the patch embedding,
+# so block i is read at hidden_states[i+1] via features.py::_block_hidden_state
+# (the only place that +1 is applied).  DINOv3 instead calls
+# get_intermediate_layers, which is block-indexed already and needs no shift.
+#
+# The values below are each model's ``global_attn_indexes`` — **not** arbitrary
+# depths, and **not** to be "tidied" into even quartiles.  SAM's encoder runs at
+# 1024x1024 with patch 16, i.e. 64x64 = 4096 tokens, so full self-attention is
+# paid for only four times: those blocks have ``window_size=0`` and attend across
+# the whole grid, while every other block is restricted to 14x14 = 196-token
+# windows.  Tapping a windowed block yields window-limited features, so these are
+# the natural extraction points.  ``layer_indices[-1]`` is both the final block
+# and a global one, so ``linear_probe`` (which uses only the last entry) gets a
+# globally-attended tap.
+#
+# Unlike SAM2's Hiera encoder the SAM v1 ViT is uniform: every block emits the
+# same channel count at 64x64, so all four taps are directly concatenable.
 SAM_CONFIGS: dict[str, dict[str, Any]] = {
     "facebook/sam-vit-base": {
         "embed_dim": 768,
@@ -66,9 +81,13 @@ SAM_CONFIGS: dict[str, dict[str, Any]] = {
 }
 
 # ── SAM 2.1 Hiera configs ────────────────────────────────────────────────────
-# hidden_states from transformers includes the initial patch embedding as
-# index 0, so hidden_states[i+1] is the output of block i.  Stage-2 block
-# ranges are shifted +1 vs raw block numbers.
+# ``layer_indices`` are **block** indices, the convention shared with SAM v1 and
+# DINOv3.  As for SAM v1 — and unlike DINOv3, which has no hidden_states tuple —
+# block i is read at hidden_states[i+1] by features.py::_block_hidden_state.
+#
+# These were historically written as raw hidden_states positions, one higher than
+# the block they name; they were renumbered down by one when the shared block
+# convention landed (see issue #66).  The blocks read are unchanged.
 #
 # embed_dim:      Stage 3 channel count — what ``layer_indices`` below points at,
 #                 used by segmentation.
@@ -83,22 +102,26 @@ SAM2_CONFIGS: dict[str, dict[str, Any]] = {
     "facebook/sam2.1-hiera-tiny": {
         "embed_dim": 384,
         "cls_embed_dim": 768,
-        "layer_indices": (4, 6, 8, 10),
+        # Stage 3 spans blocks 3-9 (hidden_states[4..10])
+        "layer_indices": (3, 5, 7, 9),
     },
     "facebook/sam2.1-hiera-small": {
         "embed_dim": 384,
         "cls_embed_dim": 768,
-        "layer_indices": (4, 7, 11, 14),
+        # Stage 3 spans blocks 3-13 (hidden_states[4..14])
+        "layer_indices": (3, 6, 10, 13),
     },
     "facebook/sam2.1-hiera-base-plus": {
         "embed_dim": 448,
         "cls_embed_dim": 896,
-        "layer_indices": (6, 11, 16, 21),
+        # Stage 3 spans blocks 5-20 (hidden_states[6..21])
+        "layer_indices": (5, 10, 15, 20),
     },
     "facebook/sam2.1-hiera-large": {
         "embed_dim": 576,
         "cls_embed_dim": 1152,
-        "layer_indices": (9, 21, 33, 44),
+        # Stage 3 spans blocks 8-43 (hidden_states[9..44])
+        "layer_indices": (8, 20, 32, 43),
     },
 }
 
