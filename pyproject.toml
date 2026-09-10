@@ -80,8 +80,10 @@ filterwarnings = [
   # Third-party deprecation raised at import time by monai.networks.nets.dints,
   # which calls the deprecated torch.jit.interface. Escalating it to an error
   # aborts collection before any test runs. Scoped to this one message so that
-  # warnings from our own code still fail the suite.
-  "ignore:.*torch\\.jit\\.interface.* is deprecated:DeprecationWarning",
+  # warnings from our own code still fail the suite. The category is left
+  # unspecified on purpose: torch raises this as a DeprecationWarning on the
+  # currently pinned local version but as a FutureWarning on newer ones.
+  "ignore:.*torch\\.jit\\.interface.* is deprecated",
 ]
 log_cli_level = "INFO"
 testpaths = [
