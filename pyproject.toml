@@ -71,6 +71,11 @@ addopts = ["-ra", "--showlocals", "--strict-markers", "--strict-config"]
 xfail_strict = true
 filterwarnings = [
   "error",
+  # Third-party deprecation raised at import time by monai.networks.nets.dints,
+  # which calls the deprecated torch.jit.interface. Escalating it to an error
+  # aborts collection before any test runs. Scoped to this one message so that
+  # warnings from our own code still fail the suite.
+  "ignore:.*torch\\.jit\\.interface.* is deprecated:DeprecationWarning",
 ]
 log_cli_level = "INFO"
 testpaths = [
@@ -79,7 +84,7 @@ testpaths = [
 
 [tool.coverage]
 run.source = ["heartfm_evals"]
-port.exclude_lines = [
+report.exclude_lines = [
   'pragma: no cover',
   '\.\.\.',
   'if typing.TYPE_CHECKING:',
@@ -131,6 +136,3 @@ flake8-unused-arguments.ignore-variadic-names = true  # allow unused *args/**kwa
 
 [tool.mypy]
 ignore_missing_imports = true
-
-[tool.hatch.metadata]
-allow-direct-references = true
