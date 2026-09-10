@@ -40,6 +40,7 @@ from heartfm_evals.classification_probe import (
     sweep_C_and_train,
     validate_split_pathology_labels,
 )
+from heartfm_evals.data import subset_patients_stratified
 from heartfm_evals.device import detect_device as _detect_device
 from heartfm_evals.finetune_classification import (
     ClassificationHeadPredictor,
@@ -58,7 +59,7 @@ def parse_args() -> argparse.Namespace:
         "--data-dir",
         type=Path,
         default=None,
-        help="Override data dir (default: data/heartfm/processed/{dataset})",
+        help="Override data dir (default: ../data/heartfm/processed/{dataset})",
     )
     p.add_argument(
         "--output-dir",
@@ -82,6 +83,11 @@ def parse_args() -> argparse.Namespace:
         help="Feature cache dir (default: auto)",
     )
     p.add_argument(
+        "--cache-only",
+        action="store_true",
+        help="Extract and cache features, then exit without training",
+    )
+    p.add_argument(
         "--max-patients",
         type=int,
         default=None,
@@ -90,12 +96,23 @@ def parse_args() -> argparse.Namespace:
     p.add_argument(
         "--no-auto-download", action="store_true", help="Disable HF auto-download"
     )
-    p.add_argument("--seed", type=int, default=0, help="Random seed for reproducibility")
+    p.add_argument(
+        "--seed", type=int, default=0, help="Random seed for reproducibility"
+    )
     args = p.parse_args()
+
+    # SAM v1 exposes no CLS token, so it is global-average-pooled regardless of
+    # --pooling.  The cache path interpolates --pooling, though, so allowing
+    # "cls" here would silently write GAP vectors into a cls/ directory.
+    if args.backbone == "sam" and args.pooling != "gap":
+        p.error(
+            f"--backbone {args.backbone} has no CLS token and only supports "
+            f"--pooling gap (got {args.pooling!r})."
+        )
 
     # Set defaults that depend on --dataset
     if args.data_dir is None:
-        args.data_dir = Path(f"data/heartfm/processed/{args.dataset}")
+        args.data_dir = Path(f"../data/heartfm/processed/{args.dataset}")
     if args.output_dir is None:
         args.output_dir = Path(f"results/classification/{args.dataset}")
 
@@ -203,17 +220,21 @@ def main():
     # set_seed(args.seed)
     model_name = derive_model_name(args)
 
-    tag = eval_mode_tag(args.eval_mode, True)
-    base_name = f"{model_name}_{tag}_{args.pooling}"
-    if args.max_patients:
-        base_name += "_smoke"
+    # Only touch results/ when we are actually going to train — a --cache-only
+    # run must not create empty output directories.
+    json_path = None
+    if not args.cache_only:
+        tag = eval_mode_tag(args.eval_mode, True)
+        base_name = f"{model_name}_{tag}_{args.pooling}"
+        if args.max_patients:
+            base_name += "_smoke"
 
-    args.output_dir.mkdir(parents=True, exist_ok=True)
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    json_path = args.output_dir / f"{base_name}_{timestamp}.json"
-    if json_path.exists():
-        print(f"Skipping: {json_path} already exists.")
-        return
+        args.output_dir.mkdir(parents=True, exist_ok=True)
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        json_path = args.output_dir / f"{base_name}_{timestamp}.json"
+        if json_path.exists():
+            print(f"Skipping: {json_path} already exists.")
+            return
 
     device = detect_device(args.device)
     pathology_classes = get_pathology_classes(args.dataset)
@@ -242,10 +263,13 @@ def main():
     )
 
     if args.max_patients:
-        train_meta_df = train_meta_df.head(args.max_patients)
-        test_meta_df = test_meta_df.head(args.max_patients)
+        # Stratified, not head(): ACDC and M&M2 metadata are sorted by
+        # pathology, so head(50) on ACDC covers only 3 of 5 classes and head(50)
+        # on M&M2 only 2 of 6 — leaving the probe with missing classes.
+        train_meta_df = subset_patients_stratified(train_meta_df, args.max_patients)
+        test_meta_df = subset_patients_stratified(test_meta_df, args.max_patients)
         if val_meta_df is not None:
-            val_meta_df = val_meta_df.head(args.max_patients)
+            val_meta_df = subset_patients_stratified(val_meta_df, args.max_patients)
 
     print(f"Train: {len(train_meta_df)} patients, Test: {len(test_meta_df)} patients")
     if has_val_split:
@@ -308,12 +332,9 @@ def main():
         test_pathology_map=test_pathology_map,
     )
 
-    # ── Train ──
-    print("Training...")
-
     # ── Feature caching (shared by logreg and finetune) ──
     cls_cache_dir = args.cls_cache_dir or Path(
-        f"classification_feature_cache/{args.dataset}/{model_name}/{args.pooling}"
+        f"feature_cache_classification/{args.dataset}/{model_name}/{args.pooling}"
     )
 
     if args.backbone == "cinema":
@@ -333,6 +354,19 @@ def main():
     train_manifest = cache_fn(backbone, train_cinema, cls_cache_dir / "train", device)
     print("Caching test features...")
     test_manifest = cache_fn(backbone, test_cinema, cls_cache_dir / "test", device)
+    val_manifest = None
+    if has_val_split:
+        print("Caching val features...")
+        val_manifest = cache_fn(backbone, val_cinema, cls_cache_dir / "val", device)
+
+    if args.cache_only:
+        print(f"Cache-only: features written to {cls_cache_dir}")
+        return
+
+    assert json_path is not None  # set above whenever cache_only is False
+
+    # ── Train ──
+    print("Training...")
 
     train_cls = load_cached_cls_features(train_manifest)
     test_cls = load_cached_cls_features(test_manifest)
@@ -349,11 +383,8 @@ def main():
     )
     print(f"Feature shape: {train_features.shape}")
 
-    # Cache val features if val split exists
     val_features, val_labels = None, None
-    if has_val_split:
-        print("Caching val features...")
-        val_manifest = cache_fn(backbone, val_cinema, cls_cache_dir / "val", device)
+    if val_manifest is not None:
         val_cls = load_cached_cls_features(val_manifest)
         val_features, val_labels, _ = build_patient_features(
             val_cls,

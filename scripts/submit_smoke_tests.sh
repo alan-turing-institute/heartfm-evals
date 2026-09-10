@@ -4,8 +4,7 @@
 #
 #   CineMA  — only model, all tasks
 #   DINOv3  — dinov3_vits16 only
-#   SAM     — facebook/sam-vit-base only   (classification)
-#   SAM2    — facebook/sam2.1-hiera-tiny   (segmentation)
+#   SAM     — facebook/sam-vit-base only   (classification + segmentation)
 #
 # Run from the repo root:
 #   bash scripts/submit_smoke_tests.sh
@@ -45,11 +44,11 @@ sbatch --array=0,3,6 "$SEG/batch_run_dino_linear_probe_segmentation.sh"
 sbatch --array=0,3,6 "$SEG/batch_run_dino_conv_decoder_segmentation.sh"
 sbatch --array=0,3,6 "$SEG/batch_run_dino_unetr_segmentation.sh"
 
-# SAM2: hiera-tiny = config_idx 0 per dataset
-# acdc→0  mnm→4  mnm2→8
-sbatch --array=0,4,8 "$SEG/batch_run_sam2_linear_probe_segmentation.sh"
-sbatch --array=0,4,8 "$SEG/batch_run_sam2_conv_decoder_segmentation.sh"
-sbatch --array=0,4,8 "$SEG/batch_run_sam2_unetr_segmentation.sh"
+# SAM v1: sam-vit-base = config_idx 0 per dataset
+# acdc→0  mnm→3  mnm2→6
+sbatch --array=0,3,6 "$SEG/batch_run_sam_linear_probe_segmentation.sh"
+sbatch --array=0,3,6 "$SEG/batch_run_sam_conv_decoder_segmentation.sh"
+sbatch --array=0,3,6 "$SEG/batch_run_sam_unetr_segmentation.sh"
 
 echo ""
 echo "All smoke-test jobs submitted."

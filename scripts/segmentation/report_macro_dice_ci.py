@@ -31,7 +31,6 @@ BACKBONE_DISPLAY = {
     "cinema": "CineMA",
     "dinov3": "Dino",
     "sam": "SAM",
-    "sam2": "SAM2",
 }
 
 DECODER_DISPLAY = {

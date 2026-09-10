@@ -19,7 +19,7 @@ import pandas as pd
 
 DATASETS = ["acdc", "mnm", "mnm2"]
 DECODER_ORDER = ["Linear", "Conv", "UNETR"]
-BACKBONE_ORDER = ["CineMA", "Dino", "SAM2"]
+BACKBONE_ORDER = ["CineMA", "Dino", "SAM"]
 
 
 def load_dataset(results_dir: Path, dataset: str) -> pd.DataFrame:
@@ -46,13 +46,11 @@ def aggregate(results_dir: Path) -> pd.DataFrame:
     wide["_decoder_order"] = wide["Decoder"].map(
         {d: i for i, d in enumerate(DECODER_ORDER)}
     )
-    wide = wide.sort_values(
-        ["_backbone_order", "_decoder_order", "Model"]
-    ).drop(columns=["_backbone_order", "_decoder_order"])
-
-    column_order = (
-        ["Backbone", "Model", "Decoder"] + DATASETS + ["Mean Macro Dice"]
+    wide = wide.sort_values(["_backbone_order", "_decoder_order", "Model"]).drop(
+        columns=["_backbone_order", "_decoder_order"]
     )
+
+    column_order = ["Backbone", "Model", "Decoder"] + DATASETS + ["Mean Macro Dice"]
     return wide[column_order].reset_index(drop=True)
 
 
@@ -65,7 +63,7 @@ DECODER_COLORS = {
 BACKBONE_COLORS = {
     "CineMA": "#4C72B0",
     "Dino": "#DD8452",
-    "SAM2": "#55A467",
+    "SAM": "#55A467",
 }
 
 
@@ -100,7 +98,7 @@ def _grouped_bar_plot(
         positions = [cursor + i * bar_width for i in range(n)]
         group_centers.append(sum(positions) / n)
 
-        for pos, (_, row) in zip(positions, sub.iterrows()):
+        for pos, (_, row) in zip(positions, sub.iterrows(), strict=False):
             color_key = row[color_col]
             label = color_key if color_key not in seen else None
             seen.add(color_key)

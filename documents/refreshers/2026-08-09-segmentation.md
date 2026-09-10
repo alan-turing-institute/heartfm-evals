@@ -29,7 +29,7 @@ python scripts/segmentation/run_segmentation.py \
 
 Flow: `detect_device()` → `load_backbone()` (frozen: `.eval()` + `requires_grad=False`) →
 `load_segmentation_datasets()` → pre-extract features to `.pt` under
-`feature_cache/{dataset}/{model}[_unetr3d]/` → train decoder with AdamW + cosine schedule and
+`feature_cache_segmentation/{dataset}/{model}[_unetr3d]/` → train decoder with AdamW + cosine schedule and
 early stopping on val macro Dice → evaluate → write results.
 
 Outputs land in `results/segmentation/{dataset}/` as `{model}_{decoder}_{YYYYmmdd_HHMMSS}.json`

@@ -23,10 +23,38 @@ _imagenet_normalize = imagenet_normalize
 # ── Public dataset loader ──────────────────────────────────────────────────────
 
 
+def subset_patients_stratified(
+    meta_df: pd.DataFrame, max_patients: int | None
+) -> pd.DataFrame:
+    """Return at most *max_patients* rows, spread across pathology classes.
+
+    ``head(max_patients)`` is not usable for classification smoke tests: the
+    ACDC and M&M2 metadata are *sorted by pathology*, so ``head(50)`` on ACDC
+    yields only 3 of 5 classes and ``head(50)`` on M&M2 only 2 of 6 — leaving
+    the probe with missing classes and a broken stratified CV.
+
+    Takes the first ``max_patients // n_classes`` patients of each class
+    (deterministic, no RNG, so no interaction with ``--seed``).  Returns
+    *meta_df* unchanged when *max_patients* is falsy or already large enough,
+    and falls back to ``head`` when there is no ``pathology`` column.
+    """
+    if not max_patients or len(meta_df) <= max_patients:
+        return meta_df
+    if "pathology" not in meta_df.columns:
+        return meta_df.head(max_patients).reset_index(drop=True)
+
+    n_classes = meta_df["pathology"].nunique()
+    per_class = max(1, max_patients // n_classes)
+    keep = [g.head(per_class) for _, g in meta_df.groupby("pathology", sort=False)]
+    # sort_index restores the original row order before reindexing
+    return pd.concat(keep).sort_index().reset_index(drop=True)
+
+
 def load_segmentation_datasets(
     dataset_name: str,
     data_dir: str | Path,
     split_seed: int = 0,
+    max_patients: int | None = None,
 ) -> tuple:
     """Load train / val / test ``EndDiastoleEndSystoleDataset`` for segmentation.
 
@@ -57,6 +85,10 @@ def load_segmentation_datasets(
     split_seed:
         Random seed for the ACDC validation split.  Ignored when
         ``val_metadata.csv`` exists.
+    max_patients:
+        If given, keep only the first *max_patients* rows of the train and test
+        metadata (for smoke tests).  Applied *before* the ACDC validation
+        carve-out so train and val stay disjoint.
 
     Returns
     -------
@@ -72,11 +104,21 @@ def load_segmentation_datasets(
     train_meta_df = pd.read_csv(data_dir / "train_metadata.csv", dtype={"pid": str})
     test_meta_df = pd.read_csv(data_dir / "test_metadata.csv", dtype={"pid": str})
 
+    if max_patients:
+        # ``head`` (not stratified) on purpose: for segmentation the label is
+        # per-pixel anatomy, not pathology, so class balance is irrelevant — and
+        # a stratified subset would leave the ACDC val carve-out below with no
+        # training patients left in each class.
+        train_meta_df = train_meta_df.head(max_patients)
+        test_meta_df = test_meta_df.head(max_patients)
+
     val_meta_path = data_dir / "val_metadata.csv"
     has_val_split = val_meta_path.exists()
 
     if has_val_split:
         val_meta_df = pd.read_csv(val_meta_path, dtype={"pid": str})
+        if max_patients:
+            val_meta_df = val_meta_df.head(max_patients)
         train_split_df = train_meta_df
     else:
         # ACDC-style: create val from train
@@ -98,7 +140,15 @@ def load_segmentation_datasets(
             drop=True
         )
 
-        print('Validation PIDs (ACDC-style split):', val_pids)
+        if train_split_df.empty:
+            msg = (
+                f"Carving a validation split from {len(train_meta_df)} training "
+                f"patients left no training data (val={len(val_meta_df)}). "
+                "This only happens with --max-patients set too low; use at least 3."
+            )
+            raise ValueError(msg)
+
+        print("Validation PIDs (ACDC-style split):", val_pids)
 
     # ── shared transform ──
     transform = ScaleIntensityd(keys="sax_image", factor=1 / 255, channel_wise=False)

@@ -405,8 +405,8 @@ class TestCLIHelpers:
         from pathlib import Path
 
         for dataset in ("acdc", "mnm", "mnm2"):
-            expected = Path(f"data/heartfm/processed/{dataset}")
-            assert expected == Path("data/heartfm/processed") / dataset
+            expected = Path(f"../data/heartfm/processed/{dataset}")
+            assert expected == Path("../data/heartfm/processed") / dataset
 
     def test_eval_mode_tag(self):
         import warnings

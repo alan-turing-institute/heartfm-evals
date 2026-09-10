@@ -7,15 +7,17 @@ Supports three frozen backbones with a shared downstream protocol:
     2. **CineMA**: run ``feature_forward()`` on the 3D SAX volume and
        extract the CLS token or global-mean-pool all spatial tokens → one
        ``(embed_dim,)`` embedding per cardiac-phase volume.
-    3. **SAM**: run ``get_image_embeddings()`` on each 2D slice (converted to
+    3. **SAM v1**: run ``get_image_embeddings()`` on each 2D slice (converted to
        RGB via ``SamImageProcessor``), global-average-pool the spatial feature
        map ``(C, h, w)`` → one ``(C,)`` embedding per slice (no CLS token).
 
-DINOv3 and SAM produce one embedding per 2D slice; CineMA produces one
-embedding per 3D volume.  Patient-level features are built identically:
-mean-pool ED embeddings, mean-pool ES embeddings, concatenate →
-``(2 × embed_dim,)`` vector → sklearn LogisticRegression with L2 penalty
-and C-sweep via stratified CV.
+DINOv3 and SAM v1 produce one embedding per 2D slice; CineMA produces one
+embedding per 3D volume.  SAM v1 has no CLS token, so it is GAP-only —
+``--pooling cls`` is rejected for it.
+
+Patient-level features are built identically for all three: mean-pool ED
+embeddings, mean-pool ES embeddings, concatenate → ``(2 × embed_dim,)`` vector →
+sklearn LogisticRegression with L2 penalty and C-sweep via stratified CV.
 """
 
 from __future__ import annotations

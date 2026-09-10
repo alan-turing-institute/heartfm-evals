@@ -18,7 +18,10 @@ that is the decision-record folder and it *is* meant to persist.
 
 ## Index
 
-- [2026-08-09-segmentation.md](2026-08-09-segmentation.md) — segmentation code path, the
+- [2026-09-01-segmentation.md](2026-09-01-segmentation.md) — **current for segmentation.**
+  The CineMA 2D z-misalignment bug (invalidates all committed CineMA Linear/Conv numbers),
+  SAM v1 now on the mainline, and the disk/compute blockers for the re-run.
+- [2026-08-09-segmentation.md](2026-08-09-segmentation.md) — *superseded by the above.* Segmentation code path, the
   `main` / `sam2-classification` fork, full Dice tables, and eight known issues.
 - [2026-08-09-classification.md](2026-08-09-classification.md) — classification code path,
   AUC/accuracy tables across all three datasets, the gap to the published CineMA fine-tune,

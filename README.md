@@ -37,9 +37,6 @@ cd scripts/segmentation/
 # SAM (vit-base, vit-large, vit-huge)
 bash run_sam_variants.sh > sam_variants.out
 
-# SAM 2.1 (hiera-tiny, hiera-small, hiera-base-plus, hiera-large)
-bash run_sam2_variants.sh > sam2_variants.out
-
 # SAM 3
 bash run_sam3.sh > sam3.out
 
@@ -53,9 +50,6 @@ bash run_cinema.sh > cinema.out
 
 # SAM + 3D UNetR (vit-base, vit-large, vit-huge)
 bash run_sam_unetr_variants.sh > sam_unetr_variants.out
-
-# SAM 2.1 + 3D UNetR (hiera-tiny, hiera-small, hiera-base-plus, hiera-large)
-bash run_sam2_unetr_variants.sh > sam2_unetr_variants.out
 
 # SAM 3 + 3D UNetR
 bash run_sam3_unetr.sh > sam3_unetr.out

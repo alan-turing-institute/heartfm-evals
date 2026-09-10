@@ -419,7 +419,7 @@ def get_decoder(
 
     Args:
         decoder_type: One of ``"linear_probe"``, ``"conv_decoder"``, ``"unetr"``.
-        backbone_type: One of ``"dinov3"``, ``"cinema"``, ``"sam2"``.
+        backbone_type: One of ``"dinov3"``, ``"cinema"``, ``"sam"``.
         embed_dim: Backbone embedding dimension.
         num_classes: Number of segmentation classes.
         layer_indices: Layer indices used for feature extraction.
@@ -453,7 +453,7 @@ def get_decoder(
                 **kwargs,
             )
         else:
-            # DINOv3, SAM2, SAM all use DINOv3UNetRDecoder
+            # DINOv3 and SAM both use DINOv3UNetRDecoder
             return DINOv3UNetRDecoder(
                 embed_dim=embed_dim,
                 layer_indices=layer_indices,
