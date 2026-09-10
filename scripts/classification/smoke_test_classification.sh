@@ -7,12 +7,12 @@
 
 set -euo pipefail
 
-SCRIPT="scripts/classification/run_acdc_classification.py"
+SCRIPT="scripts/classification/run_classification.py"
 MAX_PATIENTS=50
 
 run() {
     echo "=== $* ==="
-    python "$SCRIPT" "$@" --max-patients "$MAX_PATIENTS"
+    python "$SCRIPT" --dataset acdc "$@" --max-patients "$MAX_PATIENTS"
 }
 
 # ── CineMA ──
