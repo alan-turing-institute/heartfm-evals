@@ -9,7 +9,6 @@ Supported backbone types:
 * ``"dinov3"`` – DINOv3 ViT loaded via local ``torch.hub``.
 * ``"cinema"`` – CineMA 3-D cardiac ViT from HuggingFace.
 * ``"sam"``   – SAM v1 ViT (segmentation and classification).
-* ``"sam2"``  – SAM 2.1 Hiera (segmentation and classification).
 """
 
 from __future__ import annotations
@@ -44,9 +43,9 @@ DINOV3_CONFIGS: dict[str, dict[str, Any]] = {
 
 # ── SAM v1 ViT configs ───────────────────────────────────────────────────────
 # ``layer_indices`` are **block** indices, 0-based — the one convention shared by
-# every backbone family here.  How they are resolved differs: SAM v1 and SAM2 go
-# through transformers' hidden_states tuple, whose index 0 is the patch embedding,
-# so block i is read at hidden_states[i+1] via features.py::_block_hidden_state
+# every backbone family here.  How they are resolved differs: SAM v1 goes through
+# transformers' hidden_states tuple, whose index 0 is the patch embedding, so
+# block i is read at hidden_states[i+1] via features.py::_block_hidden_state
 # (the only place that +1 is applied).  DINOv3 instead calls
 # get_intermediate_layers, which is block-indexed already and needs no shift.
 #
@@ -60,8 +59,8 @@ DINOV3_CONFIGS: dict[str, dict[str, Any]] = {
 # and a global one, so ``linear_probe`` (which uses only the last entry) gets a
 # globally-attended tap.
 #
-# Unlike SAM2's Hiera encoder the SAM v1 ViT is uniform: every block emits the
-# same channel count at 64x64, so all four taps are directly concatenable.
+# The SAM v1 ViT is uniform: every block emits the same channel count at 64x64,
+# so all four taps are directly concatenable.
 SAM_CONFIGS: dict[str, dict[str, Any]] = {
     "facebook/sam-vit-base": {
         "embed_dim": 768,
@@ -77,51 +76,6 @@ SAM_CONFIGS: dict[str, dict[str, Any]] = {
         "embed_dim": 1280,
         "n_layers": 32,
         "layer_indices": (7, 15, 23, 31),
-    },
-}
-
-# ── SAM 2.1 Hiera configs ────────────────────────────────────────────────────
-# ``layer_indices`` are **block** indices, the convention shared with SAM v1 and
-# DINOv3.  As for SAM v1 — and unlike DINOv3, which has no hidden_states tuple —
-# block i is read at hidden_states[i+1] by features.py::_block_hidden_state.
-#
-# These were historically written as raw hidden_states positions, one higher than
-# the block they name; they were renumbered down by one when the shared block
-# convention landed (see issue #66).  The blocks read are unchanged.
-#
-# embed_dim:      Stage 3 channel count — what ``layer_indices`` below points at,
-#                 used by segmentation.
-# cls_embed_dim:  Stage 4 channel count — used by classification, which GAPs
-#                 ``hidden_states[-1]`` (the true final block) rather than a
-#                 ``layer_indices`` entry.  See prompts/sam2_decisions.md.
-#
-# All four ``layer_indices`` deliberately land inside Stage 3, so every extracted
-# layer has the same channel count and resolution.  See prompts/sam2_decisions.md
-# for why the multi-scale (one-block-per-stage) alternative was not adopted.
-SAM2_CONFIGS: dict[str, dict[str, Any]] = {
-    "facebook/sam2.1-hiera-tiny": {
-        "embed_dim": 384,
-        "cls_embed_dim": 768,
-        # Stage 3 spans blocks 3-9 (hidden_states[4..10])
-        "layer_indices": (3, 5, 7, 9),
-    },
-    "facebook/sam2.1-hiera-small": {
-        "embed_dim": 384,
-        "cls_embed_dim": 768,
-        # Stage 3 spans blocks 3-13 (hidden_states[4..14])
-        "layer_indices": (3, 6, 10, 13),
-    },
-    "facebook/sam2.1-hiera-base-plus": {
-        "embed_dim": 448,
-        "cls_embed_dim": 896,
-        # Stage 3 spans blocks 5-20 (hidden_states[6..21])
-        "layer_indices": (5, 10, 15, 20),
-    },
-    "facebook/sam2.1-hiera-large": {
-        "embed_dim": 576,
-        "cls_embed_dim": 1152,
-        # Stage 3 spans blocks 8-43 (hidden_states[9..44])
-        "layer_indices": (8, 20, 32, 43),
     },
 }
 
@@ -147,8 +101,6 @@ def load_backbone(
     dinov3_weights_path: str | None = None,
     # SAM v1 options
     sam_model_id: str = "facebook/sam-vit-base",
-    # SAM2 options
-    sam2_model_id: str = "facebook/sam2.1-hiera-base-plus",
     # Shared HuggingFace options
     hf_cache_dir: str | Path = "model_weights/hf",
     auto_download: bool = True,
@@ -158,7 +110,7 @@ def load_backbone(
     Parameters
     ----------
     backbone_type:
-        One of ``"dinov3"``, ``"cinema"``, ``"sam"``, ``"sam2"``.
+        One of ``"dinov3"``, ``"cinema"``, ``"sam"``.
     device:
         Target device for the model.
 
@@ -182,8 +134,6 @@ def load_backbone(
         return _load_cinema(hf_cache_dir, auto_download, device)
     if backbone_type == "sam":
         return _load_sam(sam_model_id, hf_cache_dir, auto_download, device)
-    if backbone_type == "sam2":
-        return _load_sam2(sam2_model_id, hf_cache_dir, auto_download, device)
 
     msg = f"Unknown backbone_type: {backbone_type!r}"
     raise ValueError(msg)
@@ -287,33 +237,4 @@ def _load_sam(
         "n_layers": cfg["n_layers"],
         "layer_indices": cfg["layer_indices"],
         "sam_image_processor": processor,
-    }
-
-
-def _load_sam2(
-    model_id: str, hf_cache_dir: Path, auto_download: bool, device: torch.device
-) -> tuple[nn.Module, dict[str, Any]]:
-    from transformers import Sam2Model, Sam2Processor
-
-    cfg = SAM2_CONFIGS[model_id]
-
-    processor = Sam2Processor.from_pretrained(
-        model_id,
-        cache_dir=str(hf_cache_dir),
-        local_files_only=not auto_download,
-    )
-    backbone = Sam2Model.from_pretrained(
-        model_id,
-        cache_dir=str(hf_cache_dir),
-        local_files_only=not auto_download,
-    )
-    _freeze(backbone).to(device)
-
-    return backbone, {
-        "backbone_type": "sam2",
-        "model_name": model_id.split("/")[-1].replace(".", "_").replace("-", "_"),
-        "embed_dim": cfg["embed_dim"],
-        "cls_embed_dim": cfg["cls_embed_dim"],
-        "layer_indices": cfg["layer_indices"],
-        "sam2_processor": processor,
     }

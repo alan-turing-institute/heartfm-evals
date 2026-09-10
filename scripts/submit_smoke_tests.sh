@@ -5,8 +5,6 @@
 #   CineMA  — only model, all tasks
 #   DINOv3  — dinov3_vits16 only
 #   SAM     — facebook/sam-vit-base only   (classification + segmentation)
-#   SAM2    — facebook/sam2.1-hiera-tiny   (segmentation)
-#             facebook/sam2.1-hiera-small  (classification — tiny not in the grid)
 #
 # Run from the repo root:
 #   bash scripts/submit_smoke_tests.sh
@@ -32,11 +30,6 @@ sbatch --array=0,1,6,7,12,13 "$CLS/batch_run_dino_logreg_classification.sh"
 # sbatch --array=0,3,6 "$CLS/batch_run_sam_finetune_classification.sh"
 sbatch --array=0,3,6 "$CLS/batch_run_sam_logreg_classification.sh"
 
-# SAM2: hiera-small = config_idx 0 per dataset (tiny is not in the SAM2 cls grid)
-# acdc→0  mnm→3  mnm2→6
-# sbatch --array=0,3,6 "$CLS/batch_run_sam2_finetune_classification.sh"
-sbatch --array=0,3,6 "$CLS/batch_run_sam2_logreg_classification.sh"
-
 echo ""
 echo "=== Segmentation ==="
 
@@ -56,12 +49,6 @@ sbatch --array=0,3,6 "$SEG/batch_run_dino_unetr_segmentation.sh"
 sbatch --array=0,3,6 "$SEG/batch_run_sam_linear_probe_segmentation.sh"
 sbatch --array=0,3,6 "$SEG/batch_run_sam_conv_decoder_segmentation.sh"
 sbatch --array=0,3,6 "$SEG/batch_run_sam_unetr_segmentation.sh"
-
-# SAM2: hiera-tiny = config_idx 0 per dataset
-# acdc→0  mnm→4  mnm2→8
-sbatch --array=0,4,8 "$SEG/batch_run_sam2_linear_probe_segmentation.sh"
-sbatch --array=0,4,8 "$SEG/batch_run_sam2_conv_decoder_segmentation.sh"
-sbatch --array=0,4,8 "$SEG/batch_run_sam2_unetr_segmentation.sh"
 
 echo ""
 echo "All smoke-test jobs submitted."

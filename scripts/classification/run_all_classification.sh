@@ -35,12 +35,6 @@ for dataset in "${DATASETS[@]}"; do
         run --dataset "$dataset" --backbone sam --sam-model-id "$model" --eval-mode logreg   --pooling gap
         run --dataset "$dataset" --backbone sam --sam-model-id "$model" --eval-mode finetune --pooling gap
     done
-
-    # ── SAM2 (gap only — Hiera has no CLS token) ──
-    for model in facebook/sam2.1-hiera-small facebook/sam2.1-hiera-base-plus facebook/sam2.1-hiera-large; do
-        run --dataset "$dataset" --backbone sam2 --sam2-model-id "$model" --eval-mode logreg   --pooling gap
-        run --dataset "$dataset" --backbone sam2 --sam2-model-id "$model" --eval-mode finetune --pooling gap
-    done
 done
 
 echo "All experiments complete."

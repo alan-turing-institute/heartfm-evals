@@ -28,14 +28,12 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-from sklearn.metrics import accuracy_score, balanced_accuracy_score, f1_score
-
 from _common import (
     align_and_validate_classifiers,
     load_classifiers,
     plot_pvalue_heatmap,
 )
-
+from sklearn.metrics import accuracy_score, balanced_accuracy_score, f1_score
 
 METRIC_FNS = {
     "macro_f1": lambda y, p: f1_score(y, p, average="macro"),
@@ -124,14 +122,16 @@ def summarise_significant(
         for j in range(i + 1, len(names)):
             p = pvals.iloc[i, j]
             if p < alpha:
-                rows.append({
-                    "classifier_a": names[i],
-                    "classifier_b": names[j],
-                    "score_a": f"{observed_scores[names[i]]:.4f}",
-                    "score_b": f"{observed_scores[names[j]]:.4f}",
-                    "diff_ci": ci_info.iloc[i, j],
-                    "p_value": f"{p:.6f}",
-                })
+                rows.append(
+                    {
+                        "classifier_a": names[i],
+                        "classifier_b": names[j],
+                        "score_a": f"{observed_scores[names[i]]:.4f}",
+                        "score_b": f"{observed_scores[names[j]]:.4f}",
+                        "diff_ci": ci_info.iloc[i, j],
+                        "p_value": f"{p:.6f}",
+                    }
+                )
     return pd.DataFrame(rows)
 
 
@@ -151,7 +151,9 @@ def main():
         default="macro_f1",
         help="Metric used for the paired comparison",
     )
-    p.add_argument("--n-bootstrap", type=int, default=1000, help="Number of bootstrap iterations")
+    p.add_argument(
+        "--n-bootstrap", type=int, default=1000, help="Number of bootstrap iterations"
+    )
     p.add_argument("--seed", type=int, default=0, help="RNG seed")
     p.add_argument("--alpha", type=float, default=0.05, help="Significance threshold")
     args = p.parse_args()
@@ -162,7 +164,8 @@ def main():
         dataset_dirs = [args.results_dir / args.dataset]
     else:
         dataset_dirs = sorted(
-            d for d in args.results_dir.iterdir()
+            d
+            for d in args.results_dir.iterdir()
             if d.is_dir() and list(d.glob("*.json"))
         )
 
@@ -183,15 +186,19 @@ def main():
         classifiers = align_and_validate_classifiers(classifiers)
         names = list(classifiers.keys())
 
-        print(f"  Loaded {len(classifiers)} classifiers, "
-              f"{len(next(iter(classifiers.values()))['true_labels'])} samples")
+        print(
+            f"  Loaded {len(classifiers)} classifiers, "
+            f"{len(next(iter(classifiers.values()))['true_labels'])} samples"
+        )
 
         observed_scores = {
             name: float(metric_fn(c["true_labels"], c["predictions"]))
             for name, c in classifiers.items()
         }
 
-        boot_scores = paired_bootstrap(classifiers, args.metric, args.n_bootstrap, args.seed)
+        boot_scores = paired_bootstrap(
+            classifiers, args.metric, args.n_bootstrap, args.seed
+        )
         pvals, ci_info = pairwise_bootstrap_stats(names, boot_scores)
 
         stem = f"bootstrap_{args.task}_{args.metric}"

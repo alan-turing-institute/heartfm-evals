@@ -2,14 +2,14 @@
 """Unified segmentation evaluation script.
 
 Supports all backbone × decoder × dataset combinations:
-    --backbone {dinov3,cinema,sam2}
+    --backbone {dinov3,cinema,sam}
     --decoder  {linear_probe,conv_decoder,unetr}
     --dataset  {acdc,mnm,mnm2}
 
 Usage examples:
     python scripts/segmentation/run_segmentation.py --backbone dinov3 --decoder linear_probe --dataset acdc
     python scripts/segmentation/run_segmentation.py --backbone cinema --decoder unetr --dataset mnm
-    python scripts/segmentation/run_segmentation.py --backbone sam2 --decoder conv_decoder --dataset mnm2 --sam2-model-id facebook/sam2.1-hiera-tiny
+    python scripts/segmentation/run_segmentation.py --backbone sam --decoder conv_decoder --dataset mnm2 --sam-model-id facebook/sam-vit-base
 """
 
 from __future__ import annotations
@@ -32,7 +32,6 @@ from heartfm_evals.caching import (
     cache_cinema_volume_features,
     cache_dino_volume_features,
     cache_features,
-    cache_sam2_2d_features,
     cache_sam_2d_features,
     cache_sam_volume_features,
 )
@@ -55,9 +54,7 @@ from heartfm_evals.training import (
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Unified segmentation evaluation")
-    p.add_argument(
-        "--backbone", required=True, choices=["dinov3", "cinema", "sam", "sam2"]
-    )
+    p.add_argument("--backbone", required=True, choices=["dinov3", "cinema", "sam"])
     p.add_argument(
         "--decoder", required=True, choices=["linear_probe", "conv_decoder", "unetr"]
     )
@@ -76,7 +73,6 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--dinov3-repo-dir", default="models/dinov3/")
     p.add_argument("--dinov3-weights-path", default=None)
     p.add_argument("--sam-model-id", default="facebook/sam-vit-base")
-    p.add_argument("--sam2-model-id", default="facebook/sam2.1-hiera-base-plus")
     p.add_argument("--hf-cache-dir", type=Path, default=Path("model_weights/hf"))
 
     # Layer selection
@@ -123,8 +119,6 @@ def derive_model_name(args: argparse.Namespace) -> str:
         return "cinema_pretrained"
     if args.backbone == "sam":
         return args.sam_model_id.split("/")[-1].replace("-", "_")
-    if args.backbone == "sam2":
-        return args.sam2_model_id.split("/")[-1].replace("-", "_").replace(".", "_")
     return args.dinov3_model_name
 
 
@@ -227,10 +221,6 @@ def main() -> None:
         backbone_kwargs["sam_model_id"] = args.sam_model_id
         backbone_kwargs["hf_cache_dir"] = str(args.hf_cache_dir)
         backbone_kwargs["auto_download"] = not args.no_auto_download
-    elif args.backbone == "sam2":
-        backbone_kwargs["sam2_model_id"] = args.sam2_model_id
-        backbone_kwargs["hf_cache_dir"] = str(args.hf_cache_dir)
-        backbone_kwargs["auto_download"] = not args.no_auto_download
     elif args.backbone == "cinema":
         backbone_kwargs["hf_cache_dir"] = str(args.hf_cache_dir)
         backbone_kwargs["auto_download"] = not args.no_auto_download
@@ -266,7 +256,7 @@ def main() -> None:
     print(f"Train: {len(train_ds)}, Val: {len(val_ds)}, Test: {len(test_ds)}")
 
     # ── Cache features ──
-    sam_processor = config.get("sam_image_processor") or config.get("sam2_processor")
+    sam_processor = config.get("sam_image_processor")
 
     if is_volume:
         # 3D volume caching
@@ -290,7 +280,7 @@ def main() -> None:
             test_manifest = cache_cinema_volume_features(
                 backbone, test_ds, cache_dir / "test", device
             )
-        else:  # sam or sam2 — one extractor serves both families
+        else:  # sam
             train_manifest = cache_sam_volume_features(
                 backbone,
                 sam_processor,
@@ -337,7 +327,7 @@ def main() -> None:
             test_manifest = cache_cinema_2d_features(
                 backbone, test_ds, cache_dir / "test", device
             )
-        elif args.backbone == "sam":
+        else:  # sam
             train_manifest = cache_sam_2d_features(
                 backbone,
                 sam_processor,
@@ -355,31 +345,6 @@ def main() -> None:
                 device,
             )
             test_manifest = cache_sam_2d_features(
-                backbone,
-                sam_processor,
-                test_ds,
-                cache_dir / "test",
-                layer_indices,
-                device,
-            )
-        else:  # sam2
-            train_manifest = cache_sam2_2d_features(
-                backbone,
-                sam_processor,
-                train_ds,
-                cache_dir / "train",
-                layer_indices,
-                device,
-            )
-            val_manifest = cache_sam2_2d_features(
-                backbone,
-                sam_processor,
-                val_ds,
-                cache_dir / "val",
-                layer_indices,
-                device,
-            )
-            test_manifest = cache_sam2_2d_features(
                 backbone,
                 sam_processor,
                 test_ds,
