@@ -1,7 +1,7 @@
 # Classification Plots
 
 `plot_classification_results.ipynb` generates diagnostic plots from a JSON
-results file produced by `scripts/classification/run_acdc_classification.py`.
+results file produced by `scripts/classification/run_classification.py`.
 
 Point `RESULTS_PATH` at any result JSON and run all cells to get:
 
