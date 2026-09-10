@@ -264,7 +264,6 @@ class TestBinaryDetection:
     def test_binary_detection_6_classes(self):
         mnm2_classes = get_pathology_classes("mnm2")
         nor_idx = mnm2_classes["NOR"]
-        n_samples = 12
         n_classes = 6
 
         # Probabilities: all probability on the true class

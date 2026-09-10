@@ -217,8 +217,6 @@ class DINOv3UNetRDecoder(nn.Module):
         Returns:
             logits: (B, num_classes, H, W, Z)
         """
-        import torch
-
         image = batch["image"]  # (B, 1, H, W, Z)
 
         # Shallowest skip: image → conv
@@ -371,8 +369,6 @@ class CineMAUNetRDecoder(nn.Module):
         Returns:
             logits: (B, num_classes, H, W, Z)
         """
-        import torch
-
         image = batch["image"]
         vit_feat = batch["vit_features"]
 

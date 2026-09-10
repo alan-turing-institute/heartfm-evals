@@ -10,10 +10,9 @@ from pathlib import Path
 
 import pandas as pd
 import torch
-import torchvision.transforms as T
 from torch.utils.data import Dataset
 
-from heartfm_evals.constants import IMAGENET_MEAN, IMAGENET_STD, imagenet_normalize
+from heartfm_evals.constants import imagenet_normalize
 
 # Re-usable ImageNet normaliser is imported from constants and also available
 # directly here for convenience.
