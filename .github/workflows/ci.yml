@@ -41,14 +41,33 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
           enable-cache: true
+          # `uv.lock` is gitignored, so key the dependency cache on the file that
+          # actually determines resolution. Without this setup-uv warns that its
+          # cache can never be invalidated.
+          cache-dependency-glob: pyproject.toml
 
-      # `uv.lock` is gitignored (see .gitignore), so dependencies are resolved
-      # fresh here rather than installed `--frozen`. `--all-extras` pulls the
-      # `dev` extra (pytest, pytest-cov). Two dependencies install from git
-      # (CineMA, dinov3), so this step is the slow one.
+      # Installed with `uv pip` rather than `uv sync` specifically so that
+      # `--torch-backend=cpu` applies: it is a `uv pip` feature, and the project
+      # interface (`uv lock` / `uv sync`) rejects the flag and silently ignores
+      # the UV_TORCH_BACKEND env var. The runners have no GPU, and the default
+      # Linux wheels pull in 18 CUDA/nvidia packages (151 -> 132 resolved
+      # packages, several GB of downloads).
+      #
+      # This is CI-only: pyproject.toml is untouched, so Isambard-AI SLURM runs
+      # and local installs still get the normal CUDA-enabled build.
+      #
+      # `uv.lock` is gitignored, so dependencies resolve fresh rather than
+      # `--frozen`. Two dependencies install from git (CineMA, dinov3).
+      #
+      # `.[dev]` rather than `--all-extras`, which `uv pip` rejects for a path
+      # target. `dev` is currently the only extra -- add new ones here too.
       - name: Install package
-        run: uv sync --all-extras
+        run: |
+          uv venv
+          uv pip install --torch-backend=cpu ".[dev]"
 
+      # `--no-sync`, because a bare `uv run` would sync the project and undo the
+      # CPU-only install above.
       - name: Test package
         run: >-
-          uv run pytest -ra --cov --cov-report=term --durations=20
+          uv run --no-sync pytest -ra --cov --cov-report=term --durations=20
