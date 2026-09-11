@@ -63,7 +63,7 @@ jobs:
       # target. `dev` is currently the only extra -- add new ones here too.
       - name: Install package
         run: |
-          uv venv
+          uv venv --allow-existing
           uv pip install --torch-backend=cpu ".[dev]"
 
       # `--no-sync`, because a bare `uv run` would sync the project and undo the
