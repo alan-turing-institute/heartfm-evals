@@ -1,8 +1,6 @@
 # heartfm-evals
 
 [![Actions Status][actions-badge]][actions-link]
-[![PyPI version][pypi-version]][pypi-link]
-[![PyPI platforms][pypi-platforms]][pypi-link]
 
 A modular package for evaluating foundation model performance on various clinical tasks involving cardiac MRI and CT images.
 
@@ -88,9 +86,6 @@ This repository contains code under multiple licenses:
 
 
 <!-- prettier-ignore-start -->
-[actions-badge]:            https://github.com/alan-turing-institute/heartfm-evals/workflows/CI/badge.svg
-[actions-link]:             https://github.com/alan-turing-institute/heartfm-evals/actions
-[pypi-link]:                https://pypi.org/project/heartfm-evals/
-[pypi-platforms]:           https://img.shields.io/pypi/pyversions/heartfm-evals
-[pypi-version]:             https://img.shields.io/pypi/v/heartfm-evals
+[actions-badge]:            https://github.com/alan-turing-institute/heartfm-evals/actions/workflows/ci.yml/badge.svg?branch=main
+[actions-link]:             https://github.com/alan-turing-institute/heartfm-evals/actions/workflows/ci.yml
 <!-- prettier-ignore-end -->

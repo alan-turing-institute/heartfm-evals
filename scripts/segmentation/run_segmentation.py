@@ -40,7 +40,12 @@ from heartfm_evals.data import load_segmentation_datasets
 from heartfm_evals.decoders import get_decoder
 from heartfm_evals.device import detect_device
 from heartfm_evals.losses import CombinedLoss, MaskedVolumeLoss, WeightedCombinedLoss
-from heartfm_evals.reproducibility import set_seed
+
+# set_seed() is deliberately not called: the call sites were disabled in 0b5d350
+# while the non-determinism in issue #59 is investigated. The import is kept so
+# that re-enabling it stays a one-line change, and because AGENTS.md warns that
+# seeding is load-bearing for the published numbers.
+from heartfm_evals.reproducibility import set_seed  # noqa: F401
 from heartfm_evals.training import (
     evaluate,
     evaluate_per_sample,

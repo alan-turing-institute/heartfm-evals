@@ -24,7 +24,12 @@ from sklearn.model_selection import StratifiedKFold
 from sklearn.preprocessing import StandardScaler
 
 from heartfm_evals.classification_probe import NUM_PATHOLOGIES
-from heartfm_evals.reproducibility import set_seed
+
+# set_seed() is deliberately not called: the call sites were disabled in 0b5d350
+# while the non-determinism in issue #59 is investigated. The import is kept so
+# that re-enabling it stays a one-line change, and because AGENTS.md warns that
+# seeding is load-bearing for the published numbers.
+from heartfm_evals.reproducibility import set_seed  # noqa: F401
 
 logger = logging.getLogger(__name__)
 
@@ -210,7 +215,8 @@ def finetune_sweep_and_train(
     num_classes: int = NUM_PATHOLOGIES,
     val_features: torch.Tensor | None = None,
     val_labels: torch.Tensor | None = None,
-    seed: int = 0,
+    # Unused while the set_seed() call below is disabled - see issue #59.
+    seed: int = 0,  # noqa: ARG001
 ) -> tuple[float, ClassificationHead, list[dict], StandardScaler]:
     """Sweep LR via stratified k-fold CV (or val split), then retrain on all training data.
 
@@ -243,9 +249,20 @@ def finetune_sweep_and_train(
     # set_seed(seed)
 
     labels_np = train_labels.numpy()
-    use_val_split = val_features is not None and val_labels is not None
 
-    if not use_val_split:
+    # Narrow in the ``if`` itself rather than via a boolean flag, so that mypy can
+    # see val_features/val_labels are not None inside the branch. The combined
+    # tensors are loop-invariant, so they are also built once here rather than
+    # once per learning rate.
+    if val_features is not None and val_labels is not None:
+        use_val_split = True
+        combined_features = torch.cat([train_features, val_features], dim=0)
+        combined_labels = torch.cat([train_labels, val_labels], dim=0)
+        val_idx_shifted = np.arange(
+            len(train_features), len(train_features) + len(val_features)
+        )
+    else:
+        use_val_split = False
         skf = StratifiedKFold(n_splits=n_folds, shuffle=True, random_state=0)
         folds = list(skf.split(np.zeros(len(train_labels)), labels_np))
 
@@ -259,12 +276,6 @@ def finetune_sweep_and_train(
             scaler = StandardScaler()
             scaler.fit(train_features.numpy())
             train_idx = np.arange(len(train_features))
-            # Combine train+val features for _train_with_lr_cached interface
-            combined_features = torch.cat([train_features, val_features], dim=0)
-            combined_labels = torch.cat([train_labels, val_labels], dim=0)
-            val_idx_shifted = np.arange(
-                len(train_features), len(train_features) + len(val_features)
-            )
             head = ClassificationHead(in_dim, num_classes=num_classes).to(device)
             val_acc, _ = _train_with_lr_cached(
                 head,

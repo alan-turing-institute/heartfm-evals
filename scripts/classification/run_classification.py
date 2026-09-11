@@ -46,7 +46,12 @@ from heartfm_evals.finetune_classification import (
     ClassificationHeadPredictor,
     finetune_sweep_and_train,
 )
-from heartfm_evals.reproducibility import set_seed
+
+# set_seed() is deliberately not called: the call sites were disabled in 0b5d350
+# while the non-determinism in issue #59 is investigated. The import is kept so
+# that re-enabling it stays a one-line change, and because AGENTS.md warns that
+# seeding is load-bearing for the published numbers.
+from heartfm_evals.reproducibility import set_seed  # noqa: F401
 
 
 def parse_args() -> argparse.Namespace:
@@ -155,7 +160,7 @@ def build_results_dict(
     """Build a JSON-serialisable results dictionary."""
 
     def to_list(x):
-        if isinstance(x, (np.ndarray, torch.Tensor)):
+        if isinstance(x, np.ndarray | torch.Tensor):
             return x.tolist()
         return x
 

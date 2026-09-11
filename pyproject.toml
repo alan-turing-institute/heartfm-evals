@@ -42,10 +42,16 @@ dependencies = [
     "safetensors",
     "timm",
     "einops",
-    "CineMA @ git+https://github.com/alan-turing-institute/CineMA",
+    # Upstream, pinned to the commit the working environment was built from.
+    # The former alan-turing-institute/CineMA fork has been blocked by GitHub
+    # since 2026-05-04 (reason: private_information), so it can no longer be
+    # cloned by anyone. This commit is byte-identical to what that fork served.
+    "CineMA @ git+https://github.com/mathpluscode/CineMA@6d7413322073acceca71f3bf5e66ec119687874f",
     "tensorboard",
     "wandb",
-    "dinov3 @ git+https://github.com/facebookresearch/dinov3/",
+    # Pinned for the same reason: an unpinned HEAD silently changes the frozen
+    # backbone code underneath the published numbers.
+    "dinov3 @ git+https://github.com/facebookresearch/dinov3@31703e4cbf1ccb7c4a72daa1350405f86754b6d1",
     "ipykernel",
     "transformers",
     "seaborn>=0.13.2",
@@ -71,6 +77,13 @@ addopts = ["-ra", "--showlocals", "--strict-markers", "--strict-config"]
 xfail_strict = true
 filterwarnings = [
   "error",
+  # Third-party deprecation raised at import time by monai.networks.nets.dints,
+  # which calls the deprecated torch.jit.interface. Escalating it to an error
+  # aborts collection before any test runs. Scoped to this one message so that
+  # warnings from our own code still fail the suite. The category is left
+  # unspecified on purpose: torch raises this as a DeprecationWarning on the
+  # currently pinned local version but as a FutureWarning on newer ones.
+  "ignore:.*torch\\.jit\\.interface.* is deprecated",
 ]
 log_cli_level = "INFO"
 testpaths = [
@@ -79,7 +92,7 @@ testpaths = [
 
 [tool.coverage]
 run.source = ["heartfm_evals"]
-port.exclude_lines = [
+report.exclude_lines = [
   'pragma: no cover',
   '\.\.\.',
   'if typing.TYPE_CHECKING:',
@@ -131,6 +144,3 @@ flake8-unused-arguments.ignore-variadic-names = true  # allow unused *args/**kwa
 
 [tool.mypy]
 ignore_missing_imports = true
-
-[tool.hatch.metadata]
-allow-direct-references = true

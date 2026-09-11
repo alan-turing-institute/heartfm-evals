@@ -85,7 +85,7 @@ def compare_values(
                 only_in_new,
             )
 
-    elif isinstance(old, (int, float)) and isinstance(new, (int, float)):
+    elif isinstance(old, int | float) and isinstance(new, int | float):
         if math.isnan(old) and math.isnan(new):
             return
         delta = abs(old - new)
@@ -99,7 +99,7 @@ def compare_values(
                 }
             )
 
-    elif type(old) != type(new):
+    elif type(old) is not type(new):
         # Type mismatch (e.g. string vs number)
         mismatches.append(
             {

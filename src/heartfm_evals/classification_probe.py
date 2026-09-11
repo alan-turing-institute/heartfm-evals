@@ -593,11 +593,14 @@ def sweep_C_and_train(
     X = features.numpy()
     y = labels.numpy()
 
-    use_val_split = val_features is not None and val_labels is not None
-    if use_val_split:
+    # Narrow in the ``if`` itself rather than via a boolean flag, so that mypy can
+    # see val_features/val_labels are not None inside the branch.
+    if val_features is not None and val_labels is not None:
+        use_val_split = True
         X_val = val_features.numpy()
         y_val = val_labels.numpy()
     else:
+        use_val_split = False
         skf = StratifiedKFold(n_splits=n_folds, shuffle=True, random_state=0)
         folds = list(skf.split(X, y))
 
