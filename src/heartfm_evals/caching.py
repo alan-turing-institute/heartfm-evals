@@ -15,10 +15,18 @@ caches per (dataset, model), not one per decoder.
 Every function skips files that already exist, so extraction is idempotent and
 resumable; the flip side is that a stale file is never overwritten, so force
 regeneration by deleting the cache directory.
+
+Because of that, a cache is only trustworthy if it was built under one train/val/test
+split.  Each cache root therefore carries a ``split_manifest.json`` (see
+``write_or_check_split_manifest`` / ``verify_cache_splits``) that records the split and
+makes a mismatching or unrecorded cache fail loudly instead of being silently reused.
 """
 
 from __future__ import annotations
 
+import json
+import re
+from collections.abc import Iterable, Sequence
 from pathlib import Path
 
 import torch
@@ -37,6 +45,137 @@ from heartfm_evals.features import (
     extract_sam_2d_features,
     extract_sam_volume_features,
 )
+
+# ── Split manifest / contamination guard ──────────────────────────────────────
+SPLIT_MANIFEST_NAME = "split_manifest.json"
+SPLITS = ("train", "val", "test")
+_CACHE_FILE_RE = re.compile(r"^(?P<pid>.+?)_(?:ed|es)(?:_z\d+)?\.pt$")
+
+
+class CacheSplitError(RuntimeError):
+    """A feature cache does not match the train/val/test split it should hold."""
+
+
+def _split_patients(splits: dict[str, Iterable[str]]) -> dict[str, list[str]]:
+    missing = set(SPLITS) - set(splits)
+    if missing:
+        raise ValueError(f"splits is missing {sorted(missing)}")
+    return {k: sorted({str(p) for p in splits[k]}) for k in SPLITS}
+
+
+def _overlaps(patients: dict[str, list[str]]) -> dict[str, list[str]]:
+    out = {}
+    for i, a in enumerate(SPLITS):
+        for b in SPLITS[i + 1 :]:
+            shared = sorted(set(patients[a]) & set(patients[b]))
+            if shared:
+                out[f"{a}&{b}"] = shared
+    return out
+
+
+def _cached_patients(cache_dir: Path, split: str) -> set[str]:
+    """Patient IDs of every cache file under ``cache_dir/split`` (any layers_* subdir)."""
+    pids = set()
+    for f in (Path(cache_dir) / split).rglob("*.pt"):
+        m = _CACHE_FILE_RE.match(f.name)
+        if m is None:
+            raise CacheSplitError(f"Unrecognised cache file name: {f}")
+        pids.add(m.group("pid"))
+    return pids
+
+
+def write_or_check_split_manifest(
+    cache_dir: Path, splits: dict[str, Iterable[str]], split_seed: int
+) -> Path:
+    """Record the split a cache root is built under, or check it matches the record.
+
+    Call this *before* extracting.  On a fresh cache root it writes
+    ``split_manifest.json``.  Otherwise it raises :class:`CacheSplitError` if the
+    requested split differs from the recorded one, or if the root already holds ``.pt``
+    files but has no manifest (an unrecorded cache cannot be trusted).
+
+    Args:
+        cache_dir: Cache root (the directory containing ``train/``, ``val/``, ``test/``).
+        splits: ``{"train": pids, "val": pids, "test": pids}`` for this run.
+        split_seed: Seed the val split was drawn with (recorded for provenance only).
+    """
+    cache_dir = Path(cache_dir)
+    path = cache_dir / SPLIT_MANIFEST_NAME
+    patients = _split_patients(splits)
+    shared = _overlaps(patients)
+    if shared:
+        raise CacheSplitError(f"Requested splits overlap: {shared}")
+
+    if path.exists():
+        recorded = json.loads(path.read_text())["patients"]
+        if recorded != patients:
+            diff = {
+                k: {
+                    "only_requested": sorted(set(patients[k]) - set(recorded[k])),
+                    "only_recorded": sorted(set(recorded[k]) - set(patients[k])),
+                }
+                for k in SPLITS
+                if recorded[k] != patients[k]
+            }
+            raise CacheSplitError(
+                f"{cache_dir} was built under a different split (recorded "
+                f"split_seed={json.loads(path.read_text())['split_seed']}, requested "
+                f"{split_seed}): {diff}. Delete the cache to regenerate it."
+            )
+        return path
+
+    if cache_dir.exists() and any(cache_dir.rglob("*.pt")):
+        raise CacheSplitError(
+            f"{cache_dir} contains cached features but no {SPLIT_MANIFEST_NAME}; its "
+            "split is unknown. Delete the cache to regenerate it."
+        )
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps({"split_seed": split_seed, "patients": patients}, indent=2) + "\n"
+    )
+    return path
+
+
+def verify_cache_splits(cache_dir: Path, require_complete: bool = True) -> None:
+    """Check the cache on disk against its manifest; raise :class:`CacheSplitError`.
+
+    Checks that the manifest exists, that train/val/test are disjoint, and that the
+    patients with files under each split directory are exactly the manifest's (or a
+    subset, if ``require_complete`` is False — use that mid-extraction).
+    """
+    cache_dir = Path(cache_dir)
+    path = cache_dir / SPLIT_MANIFEST_NAME
+    if not path.exists():
+        raise CacheSplitError(f"{cache_dir} has no {SPLIT_MANIFEST_NAME}.")
+    recorded = json.loads(path.read_text())["patients"]
+
+    problems = []
+    shared = _overlaps(recorded)
+    if shared:
+        problems.append(f"manifest splits overlap: {shared}")
+    for split in SPLITS:
+        on_disk = _cached_patients(cache_dir, split)
+        expected = set(recorded[split])
+        if extra := sorted(on_disk - expected):
+            problems.append(f"{split}: patients not in manifest: {extra}")
+        if require_complete and (absent := sorted(expected - on_disk)):
+            problems.append(f"{split}: patients missing from cache: {absent}")
+    if problems:
+        raise CacheSplitError(f"{cache_dir}: " + "; ".join(problems))
+
+
+def verify_caches_consistent(cache_dirs: Sequence[Path]) -> None:
+    """Check several caches (e.g. different backbones) were built on the same split."""
+    cache_dirs = [Path(d) for d in cache_dirs]
+    manifests = []
+    for d in cache_dirs:
+        path = d / SPLIT_MANIFEST_NAME
+        if not path.exists():
+            raise CacheSplitError(f"{d} has no {SPLIT_MANIFEST_NAME}.")
+        manifests.append(json.loads(path.read_text())["patients"])
+    for d, m in zip(cache_dirs[1:], manifests[1:], strict=False):
+        if m != manifests[0]:
+            raise CacheSplitError(f"{d} and {cache_dirs[0]} use different splits.")
 
 
 # ── 2D Slice Feature Caching ──────────────────────────────────────────────────
