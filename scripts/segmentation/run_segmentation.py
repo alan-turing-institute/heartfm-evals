@@ -34,6 +34,8 @@ from heartfm_evals.caching import (
     cache_features,
     cache_sam_2d_features,
     cache_sam_volume_features,
+    verify_cache_splits,
+    write_or_check_split_manifest,
 )
 from heartfm_evals.constants import CLASS_NAMES, NUM_CLASSES
 from heartfm_evals.data import load_segmentation_datasets
@@ -261,6 +263,16 @@ def main() -> None:
     print(f"Train: {len(train_ds)}, Val: {len(val_ds)}, Test: {len(test_ds)}")
 
     # ── Cache features ──
+    # Refuse to extract into (or train from) a cache built under a different split.
+    write_or_check_split_manifest(
+        cache_dir,
+        {
+            "train": train_meta["pid"],
+            "val": val_meta["pid"],
+            "test": test_meta["pid"],
+        },
+        split_seed=args.seed,
+    )
     sam_processor = config.get("sam_image_processor")
 
     if is_volume:
@@ -358,6 +370,7 @@ def main() -> None:
                 device,
             )
 
+    verify_cache_splits(cache_dir)
     print(
         f"Cached: train={len(train_manifest)}, val={len(val_manifest)}, "
         f"test={len(test_manifest)}"

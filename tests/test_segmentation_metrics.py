@@ -276,6 +276,12 @@ def test_evaluate_vol_per_slice_returns_one_row_per_valid_slice() -> None:
     assert np.isclose(rows[1]["macro_dice"], 2 / 3)
 
 
+_META = {
+    split: pd.DataFrame({"pid": [pid]})
+    for split, pid in (("train", "p001"), ("val", "p002"), ("test", "p003"))
+}
+
+
 def test_run_segmentation_main_writes_2d_json_slice_and_stack_csvs(
     tmp_path: Path, monkeypatch
 ) -> None:
@@ -337,8 +343,17 @@ def test_run_segmentation_main_writes_2d_json_slice_and_stack_csvs(
     monkeypatch.setattr(
         module,
         "load_segmentation_datasets",
-        lambda *_args, **_kwargs: (["train"], ["val"], ["test"], None, None, None),
+        lambda *_args, **_kwargs: (
+            ["train"],
+            ["val"],
+            ["test"],
+            _META["train"],
+            _META["val"],
+            _META["test"],
+        ),
     )
+    # cache_* functions are stubbed, so no files exist for the split check to read.
+    monkeypatch.setattr(module, "verify_cache_splits", lambda _cache_dir: None)
     monkeypatch.setattr(
         module,
         "cache_features",
@@ -523,8 +538,17 @@ def test_run_segmentation_main_writes_3d_json_and_parallel_slice_csv(
     monkeypatch.setattr(
         module,
         "load_segmentation_datasets",
-        lambda *_args, **_kwargs: (["train"], ["val"], ["test"], None, None, None),
+        lambda *_args, **_kwargs: (
+            ["train"],
+            ["val"],
+            ["test"],
+            _META["train"],
+            _META["val"],
+            _META["test"],
+        ),
     )
+    # cache_* functions are stubbed, so no files exist for the split check to read.
+    monkeypatch.setattr(module, "verify_cache_splits", lambda _cache_dir: None)
     monkeypatch.setattr(
         module,
         "cache_cinema_volume_features",
