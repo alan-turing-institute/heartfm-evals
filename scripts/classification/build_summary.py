@@ -93,9 +93,17 @@ def build_summary(dataset_dir: Path) -> str:
     json_files = sorted(dataset_dir.glob("*.json"))
 
     rows = []
+    seen: dict[tuple[str, ...], str] = {}
     for f in json_files:
         m = parse_result_file(f)
         if m:
+            key = (m["backbone"], m["model_name"], m["eval_mode"], m["pooling"])
+            if key in seen:
+                raise ValueError(
+                    f"Duplicate result for {'/'.join(key)} in {dataset_dir}: "
+                    f"{seen[key]} and {f.name}"
+                )
+            seen[key] = f.name
             rows.append(m)
 
     mode_order = {"logreg": 0, "ft-frozen": 1, "ft-full": 2}
