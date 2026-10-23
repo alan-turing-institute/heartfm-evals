@@ -5,7 +5,11 @@ All tests use synthetic data — no real models or data files required.
 
 from __future__ import annotations
 
+import re
+import shlex
+import sys
 import warnings
+from pathlib import Path
 from unittest.mock import MagicMock
 
 import numpy as np
@@ -414,6 +418,24 @@ class TestCLIHelpers:
             warnings.simplefilter("ignore", DeprecationWarning)
             from scripts.classification.run_classification import eval_mode_tag
 
-        assert eval_mode_tag("logreg", True) == "logreg"
-        assert eval_mode_tag("finetune", True) == "ftfrozen"
-        assert eval_mode_tag("finetune", False) == "ftfull"
+        assert eval_mode_tag("logreg") == "logreg"
+        assert eval_mode_tag("finetune") == "ftfrozen"
+
+    def test_readme_run_commands_parse(self, monkeypatch):
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", DeprecationWarning)
+            from scripts.classification.run_classification import parse_args
+
+        readme = Path(__file__).parents[1] / "scripts/classification/README.md"
+        text = readme.read_text().replace("\\\n", " ")
+        commands = [
+            shlex.split(line)[2:]
+            for line in text.splitlines()
+            if re.match(
+                r"\s*python scripts/classification/run_classification\.py", line
+            )
+        ]
+        assert commands
+        for argv in commands:
+            monkeypatch.setattr(sys, "argv", ["run_classification.py", *argv])
+            parse_args()
