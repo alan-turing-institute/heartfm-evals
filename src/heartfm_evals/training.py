@@ -15,6 +15,7 @@ from __future__ import annotations
 import numpy as np
 import torch
 import torch.nn as nn
+from tqdm import tqdm
 
 from heartfm_evals.constants import CLASS_NAMES, NUM_CLASSES
 from heartfm_evals.losses import MaskedVolumeLoss
@@ -61,7 +62,7 @@ def train_one_epoch(
     model.train()
     total_loss = 0.0
     n_batches = 0
-    for batch in dataloader:
+    for batch in tqdm(dataloader, desc="train", leave=False):
         features = batch["features"].to(device)  # (B, C, h, w)
         labels = batch["label"].to(device)  # (B, H, W)
 

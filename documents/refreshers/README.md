@@ -18,9 +18,16 @@ that is the decision-record folder and it *is* meant to persist.
 
 ## Index
 
-- [2026-09-01-segmentation.md](2026-09-01-segmentation.md) — **current for segmentation.**
+- [2026-10-22-segmentation.md](2026-10-22-segmentation.md) — **current for segmentation.**
+  Committed results deleted ahead of the ACDC re-run (issue #74), nothing regenerated yet,
+  and the DINOv3-S 2D ACDC cache holds a second train/val split that must be repaired first.
+- [2026-09-11-segmentation.md](2026-09-11-segmentation.md) — *superseded by the above.*
+  SAM2 removed and archived, the SAM v1 off-by-one fixed (taps moved to the
+  global-attention blocks), tests/CI restored — and the two blockers that remain: disk and
+  SAM extraction time.
+- [2026-09-01-segmentation.md](2026-09-01-segmentation.md) — *superseded by the above.*
   The CineMA 2D z-misalignment bug (invalidates all committed CineMA Linear/Conv numbers),
-  SAM v1 now on the mainline, and the disk/compute blockers for the re-run.
+  SAM v1 arriving on the mainline, and the disk/compute blockers for the re-run.
 - [2026-08-09-segmentation.md](2026-08-09-segmentation.md) — *superseded by the above.* Segmentation code path, the
   `main` / `sam2-classification` fork, full Dice tables, and eight known issues.
 - [2026-08-09-classification.md](2026-08-09-classification.md) — classification code path,

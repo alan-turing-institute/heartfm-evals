@@ -9,8 +9,10 @@ The averaging can be performed either:
 - at the sample level, using every non-empty ``macro_dice`` row directly
 - at the patient level, first averaging rows within each ``pid``
 
-By default it reads ``*_per_sample.csv`` files from a dataset directory and
-writes ``macro_dice_ci_summary.csv`` alongside them.
+By default it reads both ``*_per_sample.csv`` and ``*_per_stack.csv`` files from
+a dataset directory and writes ``macro_dice_ci_summary.csv`` alongside them. Every
+run emits exactly one of the two -- unetr the former, linear_probe and
+conv_decoder the latter -- so the default covers the whole decoder grid.
 
 Usage:
     python scripts/segmentation/report_macro_dice_ci.py
@@ -23,6 +25,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+from collections.abc import Sequence
 from pathlib import Path
 
 import numpy as np
@@ -191,16 +194,22 @@ def format_summary_value(value: str | int | float) -> str:
 
 def build_summary(
     dataset_dir: Path,
-    pattern: str,
+    patterns: Sequence[str],
     confidence_level: float,
     n_bootstrap: int,
     seed: int,
     summary_level: str,
 ) -> list[dict[str, str | int | float]]:
-    """Build summary rows for matching CSV files in a dataset directory."""
+    """Build summary rows for matching CSV files in a dataset directory.
+
+    Each pattern is globbed independently and the results de-duplicated, so
+    that the per-stack and per-sample families can be summarised in one pass
+    without a file matched by two patterns being counted twice.
+    """
+    paths = sorted({path for pattern in patterns for path in dataset_dir.glob(pattern)})
     rows = [
         summarize_csv(path, confidence_level, n_bootstrap, seed, summary_level)
-        for path in sorted(dataset_dir.glob(pattern))
+        for path in paths
     ]
 
     rows.sort(
@@ -251,8 +260,16 @@ def main() -> None:
     )
     parser.add_argument(
         "--pattern",
-        default="*_per_sample.csv",
-        help="Glob pattern for selecting result CSV files.",
+        nargs="+",
+        default=["*_per_sample.csv", "*_per_stack.csv"],
+        help=(
+            "Glob pattern(s) for selecting result CSV files. The default covers "
+            "both families because a run writes exactly one of them: unetr emits "
+            "*_per_sample.csv while linear_probe and conv_decoder emit "
+            "*_per_stack.csv. The two share a schema and both carry one row per "
+            "patient-frame stack, so they summarise on the same footing. Defaulting "
+            "to *_per_sample.csv alone silently restricted every CI table to UNETR."
+        ),
     )
     parser.add_argument(
         "--confidence-level",
@@ -294,7 +311,7 @@ def main() -> None:
 
     rows = build_summary(
         dataset_dir=args.dataset_dir,
-        pattern=args.pattern,
+        patterns=args.pattern,
         confidence_level=args.confidence_level,
         n_bootstrap=args.n_bootstrap,
         seed=args.seed,
