@@ -30,6 +30,10 @@ that is the decision-record folder and it *is* meant to persist.
   SAM v1 arriving on the mainline, and the disk/compute blockers for the re-run.
 - [2026-08-09-segmentation.md](2026-08-09-segmentation.md) — *superseded by the above.* Segmentation code path, the
   `main` / `sam2-classification` fork, full Dice tables, and eight known issues.
-- [2026-08-09-classification.md](2026-08-09-classification.md) — classification code path,
+- [2026-10-23-classification.md](2026-10-23-classification.md) — **current for classification.**
+  No result has changed since 08-09; one of eleven issues fixed, the SAM v1 fix shown not to
+  affect classification, and `sam2-classification` now needing a port rather than a merge.
+- [2026-08-09-classification.md](2026-08-09-classification.md) — *superseded by the above, but
+  still the reference for the numbers.* Classification code path,
   AUC/accuracy tables across all three datasets, the gap to the published CineMA fine-tune,
   and eleven known issues.
