@@ -36,6 +36,7 @@ def load_classifiers(dataset_dir: Path, task: str) -> dict[str, dict]:
     }
     """
     classifiers = {}
+    sources: dict[str, str] = {}
     for f in sorted(dataset_dir.glob("*.json")):
         data = json.loads(f.read_text())
         cfg = data.get("config", {})
@@ -49,6 +50,12 @@ def load_classifiers(dataset_dir: Path, task: str) -> dict[str, dict]:
             eval_mode = "ft-full"
 
         label = classifier_label(cfg, eval_mode)
+        if label in sources:
+            raise ValueError(
+                f"Duplicate result for {label} in {dataset_dir}: "
+                f"{sources[label]} and {f.name}"
+            )
+        sources[label] = f.name
 
         if task == "five_way":
             section = data.get("five_way", {})
