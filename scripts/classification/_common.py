@@ -14,11 +14,20 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 
-# The finetune path trains a head on frozen features; there is no full fine-tune.
-EVAL_MODE_LABELS = {"logreg": "logreg", "finetune": "ft-frozen"}
+# Results written before issue #83 store the head under "eval_mode", with the
+# linear head called "finetune" (it never trained the backbone).
+HEAD_LABELS = {"logreg": "logreg", "linear": "linear", "finetune": "linear"}
 
 
-def classifier_label(config: dict, eval_mode: str) -> str:
+def head_label(config: dict, path: Path) -> str:
+    """Return the head label from a result config, accepting legacy keys."""
+    head_raw = config.get("head", config.get("eval_mode"))
+    if head_raw not in HEAD_LABELS:
+        raise ValueError(f"Unknown head {head_raw!r} in {path}")
+    return HEAD_LABELS[head_raw]
+
+
+def classifier_label(config: dict, head: str) -> str:
     """Build a short human-readable label for a classifier."""
     backbone = config.get("backbone", "?")
     model = config.get("model_name", "?")
@@ -26,7 +35,7 @@ def classifier_label(config: dict, eval_mode: str) -> str:
     short_model = (
         model.replace("cinema_", "").replace("dinov3_", "").replace("sam_", "")
     )
-    return f"{backbone}_{short_model}_{eval_mode}_{pooling}"
+    return f"{backbone}_{short_model}_{head}_{pooling}"
 
 
 def load_classifiers(dataset_dir: Path, task: str) -> dict[str, dict]:
@@ -44,12 +53,7 @@ def load_classifiers(dataset_dir: Path, task: str) -> dict[str, dict]:
         data = json.loads(f.read_text())
         cfg = data.get("config", {})
 
-        eval_mode_raw = cfg.get("eval_mode")
-        if eval_mode_raw not in EVAL_MODE_LABELS:
-            raise ValueError(f"Unknown eval_mode {eval_mode_raw!r} in {f}")
-        eval_mode = EVAL_MODE_LABELS[eval_mode_raw]
-
-        label = classifier_label(cfg, eval_mode)
+        label = classifier_label(cfg, head_label(cfg, f))
         if label in sources:
             raise ValueError(
                 f"Duplicate result for {label} in {dataset_dir}: "
