@@ -52,8 +52,8 @@ SAM v1 has no CLS token, so it supports `gap` only.
   dedicated val split when available).
 - **`finetune`** — Linear head on top of the backbone, trained with AdamW +
   cosine annealing. Learning rate is selected via 10-fold stratified CV (or
-  a dedicated val split). The backbone can be kept frozen (`--freeze-backbone`,
-  default) or fine-tuned end-to-end (`--no-freeze-backbone`).
+  a dedicated val split). The backbone stays frozen; only the head is trained
+  (reported as `ft-frozen`).
 
 ## Scripts
 
@@ -71,9 +71,9 @@ SAM v1 has no CLS token, so it supports `gap` only.
 python scripts/classification/run_classification.py \
     --dataset acdc --backbone cinema --eval-mode logreg --pooling cls
 
-# Run on M&Ms with DINOv3, full fine-tune
+# Run on M&Ms with DINOv3, linear head trained on frozen features
 python scripts/classification/run_classification.py \
-    --dataset mnm --backbone dinov3 --eval-mode finetune --no-freeze-backbone
+    --dataset mnm --backbone dinov3 --eval-mode finetune --pooling gap
 
 # Full grid (all datasets, all backbones)
 bash scripts/classification/run_all_classification.sh
@@ -90,7 +90,6 @@ python scripts/classification/build_summary.py
 | `--backbone` | — | `cinema`, `dinov3`, or `sam` |
 | `--eval-mode` | — | `logreg` or `finetune` |
 | `--pooling` | `cls` | `cls` or `gap` (`sam`: `gap` only) |
-| `--freeze-backbone` / `--no-freeze-backbone` | frozen | Fine-tune mode only |
 | `--data-dir` | `../data/heartfm/processed/{dataset}` | Override data directory |
 | `--output-dir` | `results/classification/{dataset}` | Override output directory |
 | `--max-patients` | — | Limit patients, stratified across pathology classes (for smoke tests) |

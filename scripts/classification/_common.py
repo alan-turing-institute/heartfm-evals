@@ -14,6 +14,9 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 
+# The finetune path trains a head on frozen features; there is no full fine-tune.
+EVAL_MODE_LABELS = {"logreg": "logreg", "finetune": "ft-frozen"}
+
 
 def classifier_label(config: dict, eval_mode: str) -> str:
     """Build a short human-readable label for a classifier."""
@@ -42,12 +45,9 @@ def load_classifiers(dataset_dir: Path, task: str) -> dict[str, dict]:
         cfg = data.get("config", {})
 
         eval_mode_raw = cfg.get("eval_mode")
-        if eval_mode_raw == "logreg":
-            eval_mode = "logreg"
-        elif cfg.get("freeze_backbone", True):
-            eval_mode = "ft-frozen"
-        else:
-            eval_mode = "ft-full"
+        if eval_mode_raw not in EVAL_MODE_LABELS:
+            raise ValueError(f"Unknown eval_mode {eval_mode_raw!r} in {f}")
+        eval_mode = EVAL_MODE_LABELS[eval_mode_raw]
 
         label = classifier_label(cfg, eval_mode)
         if label in sources:

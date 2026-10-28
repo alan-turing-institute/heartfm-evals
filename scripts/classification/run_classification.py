@@ -136,11 +136,11 @@ def derive_model_name(args) -> str:
     return args.dinov3_model_name
 
 
-def eval_mode_tag(eval_mode: str, freeze_backbone: bool) -> str:
+def eval_mode_tag(eval_mode: str) -> str:
     """Return a short tag string for the evaluation mode."""
     if eval_mode == "logreg":
         return "logreg"
-    return "ftfrozen" if freeze_backbone else "ftfull"
+    return "ftfrozen"
 
 
 def build_results_dict(
@@ -229,7 +229,7 @@ def main():
     # run must not create empty output directories.
     json_path = None
     if not args.cache_only:
-        tag = eval_mode_tag(args.eval_mode, True)
+        tag = eval_mode_tag(args.eval_mode)
         base_name = f"{model_name}_{tag}_{args.pooling}"
         if args.max_patients:
             base_name += "_smoke"

@@ -23,10 +23,10 @@ BACKBONE_DISPLAY = {
     "sam": "SAM",
 }
 
+# The finetune path trains a head on frozen features; there is no full fine-tune.
 EVAL_MODE_DISPLAY = {
     "logreg": "logreg",
-    "ftfrozen": "ft-frozen",
-    "ftfull": "ft-full",
+    "finetune": "ft-frozen",
 }
 
 
@@ -40,12 +40,9 @@ def parse_result_file(path: Path) -> dict | None:
         return None
 
     eval_mode_raw = cfg.get("eval_mode")
-    if eval_mode_raw == "logreg":
-        eval_mode = "logreg"
-    elif cfg.get("freeze_backbone", True):
-        eval_mode = "ft-frozen"
-    else:
-        eval_mode = "ft-full"
+    if eval_mode_raw not in EVAL_MODE_DISPLAY:
+        raise ValueError(f"Unknown eval_mode {eval_mode_raw!r} in {path}")
+    eval_mode = EVAL_MODE_DISPLAY[eval_mode_raw]
 
     five = data.get("five_way", {})
     roc = data.get("roc_auc", {})
@@ -106,7 +103,7 @@ def build_summary(dataset_dir: Path) -> str:
             seen[key] = f.name
             rows.append(m)
 
-    mode_order = {"logreg": 0, "ft-frozen": 1, "ft-full": 2}
+    mode_order = {"logreg": 0, "ft-frozen": 1}
     rows.sort(
         key=lambda r: (r["backbone"], mode_order.get(r["eval_mode"], 9), r["pooling"])
     )
