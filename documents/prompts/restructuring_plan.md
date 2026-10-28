@@ -1,3 +1,10 @@
+> **Update (2026-10-28, issue #83):** the instruction below to remove the classification
+> `finetune` path was not followed. That path never trained the backbone: it trains an
+> `nn.Linear` head on frozen, cached features, the classification counterpart of the
+> segmentation `linear_probe` decoder, so it was kept and renamed. It is now `--head linear`
+> (with `--head logreg`), in `src/heartfm_evals/linear_head.py`. The frozen-backbones-only
+> constraint still holds.
+
 **Context**: This repository (`heartfm-evals`) evaluates frozen foundation model backbones on cardiac MRI tasks (segmentation and classification). The codebase has grown organically and now has significant duplication. I want to restructure it into a modular framework. **Do not use Hydra for config management** — use argparse + dataclasses/dicts.
 
 ### Current State
