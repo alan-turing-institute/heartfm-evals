@@ -23,10 +23,12 @@ BACKBONE_DISPLAY = {
     "sam": "SAM",
 }
 
-# The finetune path trains a head on frozen features; there is no full fine-tune.
-EVAL_MODE_DISPLAY = {
+# Results written before issue #83 store the head under "eval_mode", with the
+# linear head called "finetune" (it never trained the backbone).
+HEAD_DISPLAY = {
     "logreg": "logreg",
-    "finetune": "ft-frozen",
+    "linear": "linear",
+    "finetune": "linear",
 }
 
 
@@ -39,10 +41,10 @@ def parse_result_file(path: Path) -> dict | None:
     if backbone_raw is None:
         return None
 
-    eval_mode_raw = cfg.get("eval_mode")
-    if eval_mode_raw not in EVAL_MODE_DISPLAY:
-        raise ValueError(f"Unknown eval_mode {eval_mode_raw!r} in {path}")
-    eval_mode = EVAL_MODE_DISPLAY[eval_mode_raw]
+    head_raw = cfg.get("head", cfg.get("eval_mode"))
+    if head_raw not in HEAD_DISPLAY:
+        raise ValueError(f"Unknown head {head_raw!r} in {path}")
+    head = HEAD_DISPLAY[head_raw]
 
     five = data.get("five_way", {})
     roc = data.get("roc_auc", {})
@@ -55,7 +57,7 @@ def parse_result_file(path: Path) -> dict | None:
         "backbone": BACKBONE_DISPLAY.get(backbone_raw, backbone_raw),
         "model_name": cfg.get("model_name", ""),
         "embed_dim": str(cfg.get("embed_dim", "?")),
-        "eval_mode": eval_mode,
+        "head": head,
         "pooling": cfg.get("pooling", "cls"),
         "five_acc": fmt(five.get("accuracy")),
         "five_f1": fmt(five.get("macro_f1")),
@@ -72,7 +74,7 @@ COLUMNS = [
     ("backbone", "Backbone"),
     ("model_name", "Model"),
     ("embed_dim", "Embed Dim"),
-    ("eval_mode", "Eval Mode"),
+    ("head", "Head"),
     ("pooling", "Pooling"),
     ("five_acc", "5-way Acc"),
     ("five_f1", "5-way F1"),
@@ -94,7 +96,7 @@ def build_summary(dataset_dir: Path) -> str:
     for f in json_files:
         m = parse_result_file(f)
         if m:
-            key = (m["backbone"], m["model_name"], m["eval_mode"], m["pooling"])
+            key = (m["backbone"], m["model_name"], m["head"], m["pooling"])
             if key in seen:
                 raise ValueError(
                     f"Duplicate result for {'/'.join(key)} in {dataset_dir}: "
@@ -103,10 +105,8 @@ def build_summary(dataset_dir: Path) -> str:
             seen[key] = f.name
             rows.append(m)
 
-    mode_order = {"logreg": 0, "ft-frozen": 1}
-    rows.sort(
-        key=lambda r: (r["backbone"], mode_order.get(r["eval_mode"], 9), r["pooling"])
-    )
+    head_order = {"logreg": 0, "linear": 1}
+    rows.sort(key=lambda r: (r["backbone"], head_order.get(r["head"], 9), r["pooling"]))
 
     buf = io.StringIO()
     writer = csv.writer(buf)

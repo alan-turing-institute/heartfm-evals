@@ -27,7 +27,7 @@ from heartfm_evals.classification_probe import (
     sweep_C_and_train,
     validate_split_pathology_labels,
 )
-from heartfm_evals.finetune_classification import (
+from heartfm_evals.linear_head import (
     ClassificationHead,
     ClassificationHeadPredictor,
 )
@@ -340,11 +340,11 @@ class TestSweepCWithValSplit:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# Group F: Finetune module
+# Group F: Linear head module
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-class TestFinetuneModule:
+class TestLinearHeadModule:
     def test_classification_head_custom_num_classes(self):
         head = ClassificationHead(in_dim=768, num_classes=6)
         x = torch.randn(2, 768)
@@ -411,15 +411,29 @@ class TestCLIHelpers:
             expected = Path(f"../data/heartfm/processed/{dataset}")
             assert expected == Path("../data/heartfm/processed") / dataset
 
-    def test_eval_mode_tag(self):
-        import warnings
-
+    @pytest.mark.parametrize("head", ["logreg", "linear"])
+    def test_head_flag_accepts_heads(self, monkeypatch, head):
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", DeprecationWarning)
-            from scripts.classification.run_classification import eval_mode_tag
+            from scripts.classification.run_classification import parse_args
 
-        assert eval_mode_tag("logreg") == "logreg"
-        assert eval_mode_tag("finetune") == "ftfrozen"
+        argv = ["run_classification.py", "--backbone", "cinema", "--head", head]
+        monkeypatch.setattr(sys, "argv", argv)
+        assert parse_args().head == head
+
+    @pytest.mark.parametrize(
+        "argv", [["--head", "finetune"], ["--eval-mode", "logreg"]]
+    )
+    def test_old_head_names_rejected(self, monkeypatch, argv):
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", DeprecationWarning)
+            from scripts.classification.run_classification import parse_args
+
+        monkeypatch.setattr(
+            sys, "argv", ["run_classification.py", "--backbone", "cinema", *argv]
+        )
+        with pytest.raises(SystemExit):
+            parse_args()
 
     def test_readme_run_commands_parse(self, monkeypatch):
         with warnings.catch_warnings():

@@ -8,8 +8,8 @@
 #                 slices the layer it wants out of it at train time), so only
 #                 --decoder conv_decoder is run for the 2D cache.  --decoder unetr
 #                 covers the separate 3D volume cache.
-#   classification  logreg and finetune read the same cache, so only
-#                 --eval-mode logreg is run.  Both are per (model, pooling).
+#   classification  logreg and linear heads read the same cache, so only
+#                 --head logreg is run.  Both are per (model, pooling).
 #
 # That makes 75 runs instead of the 129 the full experiment grid would need:
 #
@@ -161,7 +161,7 @@ cache_segmentation() {
 }
 
 # ── Classification ───────────────────────────────────────────────────────────
-# One cache per (model, pooling); logreg and finetune share it.
+# One cache per (model, pooling); the logreg and linear heads share it.
 # SAM v1 has no CLS token, so it is gap only -- the driver rejects --pooling cls.
 cache_classification() {
     local dataset="$1"
@@ -174,7 +174,7 @@ cache_classification() {
                     --dataset "$dataset" \
                     --backbone dinov3 \
                     --dinov3-model-name "$model" \
-                    --eval-mode logreg \
+                    --head logreg \
                     --pooling "$pooling" \
                     --cache-only
             done
@@ -185,7 +185,7 @@ cache_classification() {
                 "$PYTHON" "$CLS" \
                 --dataset "$dataset" \
                 --backbone cinema \
-                --eval-mode logreg \
+                --head logreg \
                 --pooling "$pooling" \
                 --cache-only
         fi
@@ -198,7 +198,7 @@ cache_classification() {
                 --dataset "$dataset" \
                 --backbone sam \
                 --sam-model-id "$model" \
-                --eval-mode logreg \
+                --head logreg \
                 --pooling gap \
                 --cache-only
         done

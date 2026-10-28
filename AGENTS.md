@@ -18,7 +18,7 @@ Research-oriented — **not** production medical device software.
 | **Backbones** | `dinov3` (self-supervised ViT), `sam` (SAM v1, supervised ViT), `cinema` (cardiac-MRI MAE, 3D) — all three work for **both** tasks |
 | **Datasets** | `acdc`, `mnm` (M&Ms), `mnm2` (M&Ms-2) |
 | **Segmentation decoders** | `linear_probe` (1×1 conv, DINOv3 protocol), `conv_decoder` (2D CNN), `unetr` (3D UNetR on stacked features) |
-| **Classification modes** | `logreg` (linear probe on frozen features), `finetune` (linear head, backbone frozen by default) |
+| **Classification heads** | `logreg` (sklearn logistic regression), `linear` (torch `nn.Linear`) — both on frozen, cached features |
 
 ## Layout
 
@@ -52,13 +52,13 @@ python scripts/segmentation/run_segmentation.py \
     --dataset acdc --backbone dinov3 --dinov3-model-name dinov3_vits16 --decoder unetr
 
 python scripts/classification/run_classification.py \
-    --dataset mnm --backbone cinema --eval-mode logreg --pooling cls
+    --dataset mnm --backbone cinema --head logreg --pooling cls
 ```
 
 Data defaults to `../data/heartfm/processed/{dataset}/` — one level *above* the
 repo (`train/`, `test/`, optional `val/`,
 plus `*_metadata.csv`; ACDC has no val split so one is carved from train). Results go to
-`results/{task}/{dataset}/` as `{model}_{decoder|mode}_{timestamp}.json` with sibling
+`results/{task}/{dataset}/` as `{model}_{decoder|head}_{timestamp}.json` with sibling
 `_per_slice` / `_per_stack` / `_per_sample` CSVs.
 
 Post-hoc analysis rescans those files: `build_summary.py` (per-dataset `summary.csv`),
@@ -109,7 +109,7 @@ DINOv3 backbones are re-exported by [models/dinov3/hubconf.py](models/dinov3/hub
 
 - Feature caches are keyed by model and layer set — change extraction without invalidating or repointing `--cache-dir` and you silently train on stale features.
 - `--cache-only` on either driver extracts features and exits without training; several
-  experiments share one cache (both 2D decoders; `logreg` + `finetune`), so extract per
+  experiments share one cache (both 2D decoders; the `logreg` + `linear` heads), so extract per
   *cache key*, not per experiment. `--max-patients` limits patients for smoke tests —
   stratified by pathology for classification, plain `head()` for segmentation.
 - SAM v1 (`sam`, `SAM_CONFIGS`) has no CLS token, so it is `--pooling gap` only. SAM2

@@ -6,9 +6,9 @@ results as both a Markdown summary and a JSON file containing all data needed
 to regenerate plots.
 
 Usage examples:
-    python scripts/classification/run_classification.py --dataset acdc --backbone cinema --eval-mode logreg
-    python scripts/classification/run_classification.py --dataset mnm --backbone dinov3 --eval-mode finetune
-    python scripts/classification/run_classification.py --dataset mnm2 --backbone sam --eval-mode logreg --pooling gap
+    python scripts/classification/run_classification.py --dataset acdc --backbone cinema --head logreg
+    python scripts/classification/run_classification.py --dataset mnm --backbone dinov3 --head linear
+    python scripts/classification/run_classification.py --dataset mnm2 --backbone sam --head logreg --pooling gap
 """
 
 from __future__ import annotations
@@ -42,9 +42,9 @@ from heartfm_evals.classification_probe import (
 )
 from heartfm_evals.data import subset_patients_stratified
 from heartfm_evals.device import detect_device as _detect_device
-from heartfm_evals.finetune_classification import (
+from heartfm_evals.linear_head import (
     ClassificationHeadPredictor,
-    finetune_sweep_and_train,
+    linear_head_sweep_and_train,
 )
 
 # set_seed() is deliberately not called: the call sites were disabled in 0b5d350
@@ -58,7 +58,13 @@ def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Pathology classification evaluation")
     p.add_argument("--dataset", default="acdc", choices=["acdc", "mnm", "mnm2"])
     p.add_argument("--backbone", required=True, choices=["cinema", "dinov3", "sam"])
-    p.add_argument("--eval-mode", required=True, choices=["logreg", "finetune"])
+    p.add_argument(
+        "--head",
+        required=True,
+        choices=["logreg", "linear"],
+        help="Classifier trained on frozen features: sklearn logistic regression "
+        "or a linear torch head",
+    )
     p.add_argument("--pooling", default="cls", choices=["cls", "gap"])
     p.add_argument(
         "--data-dir",
@@ -136,13 +142,6 @@ def derive_model_name(args) -> str:
     return args.dinov3_model_name
 
 
-def eval_mode_tag(eval_mode: str) -> str:
-    """Return a short tag string for the evaluation mode."""
-    if eval_mode == "logreg":
-        return "logreg"
-    return "ftfrozen"
-
-
 def build_results_dict(
     args,
     model_name,
@@ -169,11 +168,11 @@ def build_results_dict(
             "dataset": args.dataset,
             "backbone": args.backbone,
             "model_name": model_name,
-            "eval_mode": args.eval_mode,
+            "head": args.head,
             "pooling": args.pooling,
             "embed_dim": embed_dim,
             "best_hyperparam": best_hyperparam,
-            "hyperparam_name": "C" if args.eval_mode == "logreg" else "lr",
+            "hyperparam_name": "C" if args.head == "logreg" else "lr",
             "num_classes": len(pathology_classes),
             "class_names": list(pathology_classes.keys()),
         },
@@ -229,8 +228,7 @@ def main():
     # run must not create empty output directories.
     json_path = None
     if not args.cache_only:
-        tag = eval_mode_tag(args.eval_mode)
-        base_name = f"{model_name}_{tag}_{args.pooling}"
+        base_name = f"{model_name}_{args.head}_{args.pooling}"
         if args.max_patients:
             base_name += "_smoke"
 
@@ -251,7 +249,7 @@ def main():
     )
     print(f"Device: {device}")
     print(f"Backbone: {args.backbone} ({model_name})")
-    print(f"Eval mode: {args.eval_mode}")
+    print(f"Head: {args.head}")
     print(f"Pooling: {args.pooling}")
 
     # ── Load metadata and datasets ──
@@ -337,7 +335,7 @@ def main():
         test_pathology_map=test_pathology_map,
     )
 
-    # ── Feature caching (shared by logreg and finetune) ──
+    # ── Feature caching (shared by the logreg and linear heads) ──
     cls_cache_dir = args.cls_cache_dir or Path(
         f"feature_cache_classification/{args.dataset}/{model_name}/{args.pooling}"
     )
@@ -397,7 +395,7 @@ def main():
             pathology_classes=pathology_classes,
         )
 
-    if args.eval_mode == "logreg":
+    if args.head == "logreg":
         best_C, final_model, sweep_results = sweep_C_and_train(
             train_features,
             train_labels,
@@ -408,7 +406,7 @@ def main():
         best_hyperparam = best_C
         print(f"Best C = {best_C:.4g}")
     else:
-        best_lr, ft_head, sweep_results, ft_scaler = finetune_sweep_and_train(
+        best_lr, linear_head, sweep_results, head_scaler = linear_head_sweep_and_train(
             train_features,
             train_labels,
             device=device,
@@ -418,7 +416,7 @@ def main():
             val_labels=val_labels,
             seed=args.seed,
         )
-        final_model = ClassificationHeadPredictor(ft_head, ft_scaler, device)
+        final_model = ClassificationHeadPredictor(linear_head, head_scaler, device)
         best_hyperparam = best_lr
         print(f"Best LR = {best_lr:.4g}")
 

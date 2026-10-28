@@ -41,11 +41,11 @@ DATASET="${DATASETS[$dataset_idx]}"
 MODEL="${MODELS[$config_idx]}"
 POOLING="${POOLINGS[$config_idx]}"
 
-echo "=== Task ${SLURM_ARRAY_TASK_ID}: dataset=${DATASET} backbone=dinov3 model=${MODEL} eval=logreg pooling=${POOLING} ==="
+echo "=== Task ${SLURM_ARRAY_TASK_ID}: dataset=${DATASET} backbone=dinov3 model=${MODEL} head=logreg pooling=${POOLING} ==="
 
 python "$SCRIPT" \
     --dataset           "$DATASET" \
     --backbone          dinov3 \
     --dinov3-model-name "$MODEL" \
-    --eval-mode         logreg \
+    --head              logreg \
     --pooling           "$POOLING"

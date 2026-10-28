@@ -1,12 +1,12 @@
-"""Fine-tuning classification for patient-level pathology prediction.
+"""Linear-head classification for patient-level pathology prediction.
 
 Trains a linear classification head on pre-extracted (frozen backbone) features
 using the same patient-level pooling as the logistic regression probe: mean-pool
 ED slices + mean-pool ES slices → concatenate → linear head.
 
 Features are expected to be pre-cached to disk and loaded before calling
-``finetune_sweep_and_train``.  Both the logreg and finetune evaluation modes
-share the same disk-cached features.
+``linear_head_sweep_and_train``.  Both the logreg and linear heads share the
+same disk-cached features. The backbone is never trained.
 
 Hyperparameter selection uses stratified k-fold CV over a small LR grid,
 matching the logistic regression probe protocol.
@@ -203,7 +203,7 @@ def _train_with_lr_cached(
 
 
 # ── Training ─────────────────────────────────────────────────────────────────
-def finetune_sweep_and_train(
+def linear_head_sweep_and_train(
     train_features: torch.Tensor,
     train_labels: torch.Tensor,
     device: torch.device,
@@ -221,7 +221,7 @@ def finetune_sweep_and_train(
     """Sweep LR via stratified k-fold CV (or val split), then retrain on all training data.
 
     Operates entirely on pre-extracted patient feature tensors (frozen backbone).
-    Both logreg and finetune evaluation modes share the same disk-cached features.
+    Both the logreg and linear heads share the same disk-cached features.
 
     When ``val_features`` and ``val_labels`` are provided, LR selection uses
     the dedicated validation set instead of k-fold CV.

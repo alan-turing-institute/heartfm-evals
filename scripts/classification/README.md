@@ -45,22 +45,26 @@ embeddings separately, then concatenating into a single vector. Two pooling
 modes are compared: CLS token (`cls`) and global average pooling (`gap`).
 SAM v1 has no CLS token, so it supports `gap` only.
 
-## Evaluation Modes
+## Heads
+
+Both heads are trained on the same cached, frozen features; the backbone is
+never trained.
 
 - **`logreg`** — Logistic regression linear probe over frozen features.
   Regularisation strength C is selected via 10-fold stratified CV (or a
   dedicated val split when available).
-- **`finetune`** — Linear head on top of the backbone, trained with AdamW +
-  cosine annealing. Learning rate is selected via 10-fold stratified CV (or
-  a dedicated val split). The backbone stays frozen; only the head is trained
-  (reported as `ft-frozen`).
+- **`linear`** — Linear torch head (`nn.Linear`), trained with AdamW + cosine
+  annealing. Learning rate is selected via 10-fold stratified CV (or a
+  dedicated val split). Result files written before issue #83 call this
+  `finetune` (filenames `*_ftfrozen_*`); the summary scripts read them as
+  `linear`.
 
 ## Scripts
 
 | Script                        | Purpose                                                                          |
 | ----------------------------- | -------------------------------------------------------------------------------- |
-| `run_classification.py`       | Run a single experiment (dataset + backbone + eval mode + pooling)               |
-| `run_all_classification.sh`   | Run the full experiment grid (all dataset/backbone/mode/pooling combos)          |
+| `run_classification.py`       | Run a single experiment (dataset + backbone + head + pooling)                    |
+| `run_all_classification.sh`   | Run the full experiment grid (all dataset/backbone/head/pooling combos)          |
 | `build_summary.py`            | Aggregate all result JSONs into per-dataset `summary.csv` files                  |
 | `smoke_test_classification.sh`| Quick sanity check using a small patient subset on ACDC                          |
 
@@ -69,11 +73,11 @@ SAM v1 has no CLS token, so it supports `gap` only.
 ```bash
 # Single run
 python scripts/classification/run_classification.py \
-    --dataset acdc --backbone cinema --eval-mode logreg --pooling cls
+    --dataset acdc --backbone cinema --head logreg --pooling cls
 
 # Run on M&Ms with DINOv3, linear head trained on frozen features
 python scripts/classification/run_classification.py \
-    --dataset mnm --backbone dinov3 --eval-mode finetune --pooling gap
+    --dataset mnm --backbone dinov3 --head linear --pooling gap
 
 # Full grid (all datasets, all backbones)
 bash scripts/classification/run_all_classification.sh
@@ -88,7 +92,7 @@ python scripts/classification/build_summary.py
 | ------ | ------- | ----------- |
 | `--dataset` | `acdc` | Dataset: `acdc`, `mnm`, or `mnm2` |
 | `--backbone` | — | `cinema`, `dinov3`, or `sam` |
-| `--eval-mode` | — | `logreg` or `finetune` |
+| `--head` | — | `logreg` or `linear` |
 | `--pooling` | `cls` | `cls` or `gap` (`sam`: `gap` only) |
 | `--data-dir` | `../data/heartfm/processed/{dataset}` | Override data directory |
 | `--output-dir` | `results/classification/{dataset}` | Override output directory |

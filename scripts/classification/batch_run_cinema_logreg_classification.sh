@@ -33,10 +33,10 @@ config_idx=$(( SLURM_ARRAY_TASK_ID % N_CONFIGS ))
 DATASET="${DATASETS[$dataset_idx]}"
 POOLING="${POOLINGS[$config_idx]}"
 
-echo "=== Task ${SLURM_ARRAY_TASK_ID}: dataset=${DATASET} backbone=cinema eval=logreg pooling=${POOLING} ==="
+echo "=== Task ${SLURM_ARRAY_TASK_ID}: dataset=${DATASET} backbone=cinema head=logreg pooling=${POOLING} ==="
 
 python "$SCRIPT" \
     --dataset   "$DATASET" \
     --backbone  cinema \
-    --eval-mode logreg \
+    --head      logreg \
     --pooling   "$POOLING"
