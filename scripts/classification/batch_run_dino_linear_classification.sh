@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-#SBATCH --job-name=heartfm-cls-dino-finetune
+#SBATCH --job-name=heartfm-cls-dino-linear
 #SBATCH --array=0-17
 #SBATCH --output=logs/classification/%A_%a.out
 #SBATCH --error=logs/classification/%A_%a.err
@@ -7,7 +7,7 @@
 #SBATCH --gres=gpu:1
 #SBATCH --time=04:00:00
 
-# DINOv3 finetune classification array job.
+# DINOv3 linear-head classification array job.
 # 3 datasets × 6 configs = 18 tasks (indices 0–17).
 #
 # Within-dataset layout (6 configs each):
@@ -41,11 +41,11 @@ DATASET="${DATASETS[$dataset_idx]}"
 MODEL="${MODELS[$config_idx]}"
 POOLING="${POOLINGS[$config_idx]}"
 
-echo "=== Task ${SLURM_ARRAY_TASK_ID}: dataset=${DATASET} backbone=dinov3 model=${MODEL} eval=finetune pooling=${POOLING} ==="
+echo "=== Task ${SLURM_ARRAY_TASK_ID}: dataset=${DATASET} backbone=dinov3 model=${MODEL} head=linear pooling=${POOLING} ==="
 
 python "$SCRIPT" \
     --dataset           "$DATASET" \
     --backbone          dinov3 \
     --dinov3-model-name "$MODEL" \
-    --eval-mode         finetune \
+    --head              linear \
     --pooling           "$POOLING"

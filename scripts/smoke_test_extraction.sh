@@ -106,20 +106,20 @@ for dataset in $DATASETS; do
         done
     done
 
-    # Classification: logreg and finetune share one cache, so extract once per
+    # Classification: the logreg and linear heads share one cache, so extract once per
     # (model, pooling).  SAM v1 is gap-only (no CLS token).
     for pooling in cls gap; do
         for model in "${DINO_MODELS[@]}"; do
             run "extract cls $dataset dinov3/$model $pooling" \
                 "$PYTHON" "$CLS" --dataset "$dataset" --backbone dinov3 \
-                --dinov3-model-name "$model" --eval-mode logreg --pooling "$pooling" \
+                --dinov3-model-name "$model" --head logreg --pooling "$pooling" \
                 --cache-only --max-patients "$MAX_PATIENTS_EXTRACT" \
                 --cls-cache-dir "$CACHE_ROOT/cls/$dataset/$model/$pooling"
         done
 
         run "extract cls $dataset cinema $pooling" \
             "$PYTHON" "$CLS" --dataset "$dataset" --backbone cinema \
-            --eval-mode logreg --pooling "$pooling" \
+            --head logreg --pooling "$pooling" \
             --cache-only --max-patients "$MAX_PATIENTS_EXTRACT" \
             --cls-cache-dir "$CACHE_ROOT/cls/$dataset/cinema/$pooling"
     done
@@ -128,7 +128,7 @@ for dataset in $DATASETS; do
         tag="${model##*/}"
         run "extract cls $dataset sam/$tag gap" \
             "$PYTHON" "$CLS" --dataset "$dataset" --backbone sam \
-            --sam-model-id "$model" --eval-mode logreg --pooling gap \
+            --sam-model-id "$model" --head logreg --pooling gap \
             --cache-only --max-patients "$MAX_PATIENTS_EXTRACT" \
             --cls-cache-dir "$CACHE_ROOT/cls/$dataset/$tag/gap"
     done
@@ -170,7 +170,7 @@ if [[ "$TRAIN" == "1" ]]; then
         for model in "${DINO_MODELS[@]}"; do
             run "train cls dinov3/$model $pooling" \
                 "$PYTHON" "$CLS" --dataset acdc --backbone dinov3 \
-                --dinov3-model-name "$model" --eval-mode logreg --pooling "$pooling" \
+                --dinov3-model-name "$model" --head logreg --pooling "$pooling" \
                 --max-patients "$MAX_PATIENTS_CLS_TRAIN" \
                 --cls-cache-dir "$CACHE_ROOT/clstrain/$model/$pooling" \
                 --output-dir "$OUT/classification/acdc"
@@ -178,7 +178,7 @@ if [[ "$TRAIN" == "1" ]]; then
 
         run "train cls cinema $pooling" \
             "$PYTHON" "$CLS" --dataset acdc --backbone cinema \
-            --eval-mode logreg --pooling "$pooling" \
+            --head logreg --pooling "$pooling" \
             --max-patients "$MAX_PATIENTS_CLS_TRAIN" \
             --cls-cache-dir "$CACHE_ROOT/clstrain/cinema/$pooling" \
             --output-dir "$OUT/classification/acdc"
@@ -188,7 +188,7 @@ if [[ "$TRAIN" == "1" ]]; then
         tag="${model##*/}"
         run "train cls sam/$tag gap" \
             "$PYTHON" "$CLS" --dataset acdc --backbone sam --sam-model-id "$model" \
-            --eval-mode logreg --pooling gap --max-patients "$MAX_PATIENTS_CLS_TRAIN" \
+            --head logreg --pooling gap --max-patients "$MAX_PATIENTS_CLS_TRAIN" \
             --cls-cache-dir "$CACHE_ROOT/clstrain/$tag/gap" \
             --output-dir "$OUT/classification/acdc"
     done

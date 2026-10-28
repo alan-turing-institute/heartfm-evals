@@ -16,16 +16,16 @@ run() {
 }
 
 # ── CineMA ──
-run --backbone cinema --eval-mode logreg --pooling cls
+run --backbone cinema --head logreg --pooling cls
 
 # ── DINOv3 ──
 for model in dinov3_vits16 dinov3_vitb16; do
-    run --backbone dinov3 --dinov3-model-name "$model" --eval-mode logreg --pooling cls
+    run --backbone dinov3 --dinov3-model-name "$model" --head logreg --pooling cls
 done
 
 # ── SAM (gap only — no CLS token) ──
 for model in facebook/sam-vit-base facebook/sam-vit-large facebook/sam-vit-huge; do
-    run --backbone sam --sam-model-id "$model" --eval-mode logreg --pooling gap
+    run --backbone sam --sam-model-id "$model" --head logreg --pooling gap
 done
 
 echo "Smoke test complete."

@@ -34,11 +34,11 @@ config_idx=$(( SLURM_ARRAY_TASK_ID % N_CONFIGS ))
 DATASET="${DATASETS[$dataset_idx]}"
 MODEL="${MODELS[$config_idx]}"
 
-echo "=== Task ${SLURM_ARRAY_TASK_ID}: dataset=${DATASET} backbone=sam model=${MODEL} eval=logreg pooling=gap ==="
+echo "=== Task ${SLURM_ARRAY_TASK_ID}: dataset=${DATASET} backbone=sam model=${MODEL} head=logreg pooling=gap ==="
 
 python "$SCRIPT" \
     --dataset      "$DATASET" \
     --backbone     sam \
     --sam-model-id "$MODEL" \
-    --eval-mode    logreg \
+    --head         logreg \
     --pooling      gap

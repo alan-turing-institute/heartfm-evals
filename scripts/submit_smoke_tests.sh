@@ -17,17 +17,17 @@ SEG="scripts/segmentation"
 echo "=== Classification ==="
 
 # CineMA: 3 datasets × 2 poolings = 6 tasks, all are CineMA
-# sbatch --array=0-5   "$CLS/batch_run_cinema_finetune_classification.sh"
+# sbatch --array=0-5   "$CLS/batch_run_cinema_linear_classification.sh"
 sbatch --array=0-5   "$CLS/batch_run_cinema_logreg_classification.sh"
 
 # DINOv3: vits16 = config_idx 0–1 per dataset (cls/gap)
 # acdc→0,1  mnm→6,7  mnm2→12,13
-# sbatch --array=0,1,6,7,12,13 "$CLS/batch_run_dino_finetune_classification.sh"
+# sbatch --array=0,1,6,7,12,13 "$CLS/batch_run_dino_linear_classification.sh"
 sbatch --array=0,1,6,7,12,13 "$CLS/batch_run_dino_logreg_classification.sh"
 
 # SAM: sam-vit-base = config_idx 0 per dataset
 # acdc→0  mnm→3  mnm2→6
-# sbatch --array=0,3,6 "$CLS/batch_run_sam_finetune_classification.sh"
+# sbatch --array=0,3,6 "$CLS/batch_run_sam_linear_classification.sh"
 sbatch --array=0,3,6 "$CLS/batch_run_sam_logreg_classification.sh"
 
 echo ""

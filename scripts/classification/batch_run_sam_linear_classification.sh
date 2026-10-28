@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-#SBATCH --job-name=heartfm-cls-sam-finetune
+#SBATCH --job-name=heartfm-cls-sam-linear
 #SBATCH --array=0-8
 #SBATCH --output=logs/classification/%A_%a.out
 #SBATCH --error=logs/classification/%A_%a.err
@@ -7,7 +7,7 @@
 #SBATCH --gres=gpu:1
 #SBATCH --time=04:00:00
 
-# SAM (v1) finetune classification array job — gap pooling only (no CLS token).
+# SAM (v1) linear-head classification array job — gap pooling only (no CLS token).
 # 3 datasets × 3 models = 9 tasks (indices 0–8).
 #
 # Within-dataset layout (3 configs each):
@@ -34,11 +34,11 @@ config_idx=$(( SLURM_ARRAY_TASK_ID % N_CONFIGS ))
 DATASET="${DATASETS[$dataset_idx]}"
 MODEL="${MODELS[$config_idx]}"
 
-echo "=== Task ${SLURM_ARRAY_TASK_ID}: dataset=${DATASET} backbone=sam model=${MODEL} eval=finetune pooling=gap ==="
+echo "=== Task ${SLURM_ARRAY_TASK_ID}: dataset=${DATASET} backbone=sam model=${MODEL} head=linear pooling=gap ==="
 
 python "$SCRIPT" \
     --dataset      "$DATASET" \
     --backbone     sam \
     --sam-model-id "$MODEL" \
-    --eval-mode    finetune \
+    --head         linear \
     --pooling      gap
