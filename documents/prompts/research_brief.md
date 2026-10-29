@@ -25,6 +25,8 @@ documents/prompts/, scripts/classification/README.md, notebooks/classification/R
    imaging, frozen-backbone/probing benchmarks of FMs. For each: citation + link, what
    it shows, reported numbers on our datasets where available, and relation to us.
    Only cite papers you actually opened. Mark preprints as such.
+   Use subagents to search each theme above in parallel, then merge, dedupe and
+   verify their results yourself before writing this file.
 3. 03_positioning.md — our results vs. published numbers on the same datasets/tasks.
    Note where comparisons aren't like-for-like (splits, metrics, fine-tune vs. probe).
 4. REPORT.md — final assessment.
