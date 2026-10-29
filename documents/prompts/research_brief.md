@@ -41,6 +41,7 @@ documents/prompts/, scripts/classification/README.md, notebooks/classification/R
 - Open questions you couldn't resolve.
 
 # Rules
+- Work on branch `research/novelty-review` from the start.
 - Separate claims you verified against a source from claims you inferred.
 - If something is blocked (paywall, missing info), write it in documents/research/BLOCKERS.md and continue.
 - Be critical, not encouraging. I'd rather hear the idea is weak now than later.
