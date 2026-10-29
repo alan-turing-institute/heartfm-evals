@@ -30,7 +30,11 @@ that is the decision-record folder and it *is* meant to persist.
   SAM v1 arriving on the mainline, and the disk/compute blockers for the re-run.
 - [2026-08-09-segmentation.md](2026-08-09-segmentation.md) — *superseded by the above.* Segmentation code path, the
   `main` / `sam2-classification` fork, full Dice tables, and eight known issues.
-- [2026-10-23-classification.md](2026-10-23-classification.md) — **current for classification.**
+- [2026-10-29-classification.md](2026-10-29-classification.md) — **current for classification.**
+  `finetune` renamed to `--head linear`, dead `ft-full` code and the duplicate M&Ms JSON gone;
+  committed summaries not regenerated since; two conflicting published-CineMA baselines; issue
+  #82 (CineMA-paper-style head) as the next real work.
+- [2026-10-23-classification.md](2026-10-23-classification.md) — *superseded by the above.*
   No result has changed since 08-09; one of eleven issues fixed, the SAM v1 fix shown not to
   affect classification, and `sam2-classification` now needing a port rather than a merge.
 - [2026-08-09-classification.md](2026-08-09-classification.md) — *superseded by the above, but
