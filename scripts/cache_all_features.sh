@@ -47,10 +47,11 @@
 #   PYTHON       interpreter to use                            (default: python)
 #   DRY_RUN      set to 1 to print the commands without running them
 #
-# NOTE: do not pass a non-default --seed.  ACDC has no val_metadata.csv, so its
-# validation split is carved out of train by seed, and the cache path does not
-# record the seed -- extracting different models under different seeds would put
-# the same patient in train/ for one and val/ for another.
+# NOTE: do not pass a non-default --seed-data-split to the segmentation driver.
+# ACDC has no val_metadata.csv, so its validation split is carved out of train
+# by that seed, and the cache path does not record it -- extracting different
+# models under different split seeds would put the same patient in train/ for one
+# and val/ for another.  (--seed-training does not touch the split or the cache.)
 
 set -euo pipefail
 
