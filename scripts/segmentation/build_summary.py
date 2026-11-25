@@ -1,7 +1,13 @@
 """Build the summary table in results/segmentation/<dataset>/summary.csv.
 
 Scans all .json result files in each dataset subdirectory, extracts metrics,
-and rebuilds the summary table.
+and rebuilds the summary table: one row per run, so a config trained under
+several ``--seed-training`` values has one row per seed. Two runs of the same
+config with the same seeds are rejected rather than double-counted.
+
+Results written before issue #86 have no ``seed_training``: their training was
+unseeded, so that column is left blank. Their ``seed`` did set the ACDC split, so
+it is reported as the data-split seed.
 
 Usage:
     python scripts/segmentation/build_summary.py
@@ -51,6 +57,9 @@ def parse_result_file(path: Path) -> dict | None:
     def fmt(val) -> str | None:
         return f"{val:.4f}" if val is not None else None
 
+    def fmt_seed(val) -> str:
+        return "" if val is None else str(val)
+
     row: dict = {
         "backbone": BACKBONE_DISPLAY.get(backbone_raw, backbone_raw),
         "model_name": cfg.get("model_name", ""),
@@ -58,6 +67,9 @@ def parse_result_file(path: Path) -> dict | None:
         "decoder": DECODER_DISPLAY.get(decoder_raw, decoder_raw),
         "probe_layers": ",".join(str(layer) for layer in probe_layers),
         "trainable_params": str(cfg.get("trainable_params", "")),
+        # Legacy results recorded only ``seed``, which set the split, not training.
+        "seed_data_split": fmt_seed(cfg.get("seed_data_split", cfg.get("seed"))),
+        "seed_training": fmt_seed(cfg.get("seed_training")),
     }
 
     # Per-class dice scores (dynamic keys)
@@ -79,7 +91,12 @@ COLUMNS_PREFIX = [
     ("decoder", "Decoder"),
     ("probe_layers", "Probe Layers"),
     ("trainable_params", "Trainable Params"),
+    ("seed_data_split", "Seed Data Split"),
+    ("seed_training", "Seed Training"),
 ]
+
+# Fields that identify one run; two result files sharing all of them are duplicates.
+RUN_KEY = ("model_name", "decoder", "probe_layers", "seed_data_split", "seed_training")
 
 COLUMNS_SUFFIX = [
     ("macro_dice", "Macro Dice"),
@@ -94,9 +111,17 @@ def build_summary(dataset_dir: Path) -> str:
 
     rows: list[dict] = []
     class_names: set[str] = set()
+    seen: dict[tuple[str, ...], str] = {}
     for f in json_files:
         m = parse_result_file(f)
         if m:
+            key = tuple(m[k] for k in RUN_KEY)
+            if key in seen:
+                raise ValueError(
+                    f"Duplicate result for {'/'.join(key)} in {dataset_dir}: "
+                    f"{seen[key]} and {f.name}. Delete one before rebuilding."
+                )
+            seen[key] = f.name
             rows.append(m)
             class_names.update(
                 k.removeprefix("dice_") for k in m if k.startswith("dice_")
@@ -107,6 +132,9 @@ def build_summary(dataset_dir: Path) -> str:
             r["backbone"],
             DECODER_ORDER.get(r["decoder"], 9),
             r["model_name"],
+            r["seed_data_split"],
+            # numeric seed order; blank (unseeded legacy) first
+            int(r["seed_training"]) if r["seed_training"] else -1,
         )
     )
 

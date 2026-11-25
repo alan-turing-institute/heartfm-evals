@@ -5,6 +5,11 @@ for each (Backbone, Model, Decoder) combination across the three datasets,
 writes results/segmentation/summary_aggregated.csv, and saves a grouped bar
 plot to results/segmentation/macro_dice_by_backbone.png.
 
+A config trained under several ``--seed-training`` values has one summary row
+per seed. Those are first averaged within each dataset (the per-dataset columns
+are that mean, with ``{dataset} SD`` and ``{dataset} N`` alongside it), and the
+cross-dataset mean is taken over the per-dataset means.
+
 Usage:
     python scripts/segmentation/aggregate_summary.py
 """
@@ -32,13 +37,24 @@ def aggregate(results_dir: Path) -> pd.DataFrame:
     frames = [load_dataset(results_dir, d) for d in DATASETS]
     long_df = pd.concat(frames, ignore_index=True)
 
+    index = ["Backbone", "Model", "Decoder"]
+    # Average over training seeds within each dataset first, so a config with
+    # more seeds in one dataset does not weigh that dataset more.
     wide = long_df.pivot_table(
-        index=["Backbone", "Model", "Decoder"],
-        columns="Dataset",
-        values="Macro Dice",
-    ).reset_index()
-
+        index=index, columns="Dataset", values="Macro Dice", aggfunc="mean"
+    )
+    sd = long_df.pivot_table(
+        index=index, columns="Dataset", values="Macro Dice", aggfunc="std"
+    ).reindex(index=wide.index, columns=DATASETS)
+    n = long_df.pivot_table(
+        index=index, columns="Dataset", values="Macro Dice", aggfunc="count"
+    ).reindex(index=wide.index, columns=DATASETS)
+    wide = wide.reindex(columns=DATASETS)
     wide["Mean Macro Dice"] = wide[DATASETS].mean(axis=1)
+    for d in DATASETS:
+        wide[f"{d} SD"] = sd[d]
+        wide[f"{d} N"] = n[d].fillna(0).astype(int)
+    wide = wide.reset_index()
 
     wide["_backbone_order"] = wide["Backbone"].map(
         {b: i for i, b in enumerate(BACKBONE_ORDER)}
@@ -50,7 +66,13 @@ def aggregate(results_dir: Path) -> pd.DataFrame:
         columns=["_backbone_order", "_decoder_order"]
     )
 
-    column_order = ["Backbone", "Model", "Decoder"] + DATASETS + ["Mean Macro Dice"]
+    column_order = (
+        ["Backbone", "Model", "Decoder"]
+        + DATASETS
+        + ["Mean Macro Dice"]
+        + [f"{d} SD" for d in DATASETS]
+        + [f"{d} N" for d in DATASETS]
+    )
     return wide[column_order].reset_index(drop=True)
 
 
