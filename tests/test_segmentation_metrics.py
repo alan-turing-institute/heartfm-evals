@@ -308,7 +308,8 @@ def test_run_segmentation_main_writes_2d_json_slice_and_stack_csvs(
         n_epochs=1,
         patience=1,
         dropout=0.1,
-        seed=0,
+        seed_data_split=0,
+        seed_training=0,
         device="cpu",
         no_auto_download=True,
     )
@@ -495,7 +496,8 @@ def test_run_segmentation_main_writes_3d_json_and_parallel_slice_csv(
         n_epochs=1,
         patience=1,
         dropout=0.1,
-        seed=0,
+        seed_data_split=0,
+        seed_training=0,
         device="cpu",
         no_auto_download=True,
     )

@@ -72,7 +72,10 @@ Post-hoc analysis rescans those files: `build_summary.py` (per-dataset `summary.
 - `detect_device()` picks MPS → CUDA → CPU. Local dev is a Mac; real runs are SLURM jobs on **Isambard-AI** (`scripts/install.sh`).
 - `pytest` to test (`pytest --cov=heartfm_evals` for coverage) — note `filterwarnings = ["error"]`, so warnings fail. `pre-commit run -a` before proposing changes (ruff + mypy on `src`).
 - Type hints are expected; follow existing patterns in `src/heartfm_evals/`.
-- Reproducibility is load-bearing: `set_seed()` fixes seeds and enables deterministic algorithms. Past commits chased float64/determinism bugs — don't quietly change seeding, dtype, or ordering in ways that shift published numbers.
+- Reproducibility is load-bearing: `set_seed()` seeds Python/NumPy/torch and enables deterministic algorithms. Past commits chased float64/determinism bugs — don't quietly change seeding, dtype, or ordering in ways that shift published numbers.
+  - Segmentation takes two seeds: `--seed-data-split` (the ACDC val split; caches are tied to it, so keep the default unless you also change `--cache-dir`) and `--seed-training` (decoder init, dropout, shuffle order). `set_seed` is called again right before `get_decoder()` so the decoder's init does not depend on how the backbone was built (#86).
+  - Seeded CUDA runs are still not bit-identical: the backward pass of bilinear/trilinear `F.interpolate` has no deterministic CUDA kernel. CPU runs are.
+  - Classification does not call `set_seed` yet (#59): logreg is deterministic anyway, the `linear` head is not.
 
 ## Licensing — read before touching DINOv3 code
 

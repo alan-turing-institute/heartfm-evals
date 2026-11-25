@@ -42,12 +42,7 @@ from heartfm_evals.data import load_segmentation_datasets
 from heartfm_evals.decoders import get_decoder
 from heartfm_evals.device import detect_device
 from heartfm_evals.losses import CombinedLoss, MaskedVolumeLoss, WeightedCombinedLoss
-
-# set_seed() is deliberately not called: the call sites were disabled in 0b5d350
-# while the non-determinism in issue #59 is investigated. The import is kept so
-# that re-enabling it stays a one-line change, and because AGENTS.md warns that
-# seeding is load-bearing for the published numbers.
-from heartfm_evals.reproducibility import set_seed  # noqa: F401
+from heartfm_evals.reproducibility import set_seed
 from heartfm_evals.training import (
     evaluate,
     evaluate_per_sample,
@@ -98,7 +93,24 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--n-epochs", type=int, default=100)
     p.add_argument("--patience", type=int, default=20)
     p.add_argument("--dropout", type=float, default=0.1)
-    p.add_argument("--seed", type=int, default=0)
+    # Two seeds, kept apart so that training can be repeated under several seeds
+    # without changing which patients are in train/val (see issue #86).
+    p.add_argument(
+        "--seed-data-split",
+        type=int,
+        default=0,
+        help=(
+            "Seed for the ACDC validation split (ignored for datasets with a "
+            "val_metadata.csv). Feature caches are tied to the split, so a "
+            "non-default value needs its own --cache-dir."
+        ),
+    )
+    p.add_argument(
+        "--seed-training",
+        type=int,
+        default=0,
+        help="Seed for decoder initialisation, dropout and the training shuffle order",
+    )
     p.add_argument(
         "--max-patients",
         type=int,
@@ -192,7 +204,7 @@ def save_metrics_csv(
 
 def main() -> None:
     args = parse_args()
-    # set_seed(args.seed)
+    set_seed(args.seed_training)
     device = detect_device(args.device)
     model_name = derive_model_name(args)
     cache_dir = derive_cache_dir(args, model_name)
@@ -201,7 +213,7 @@ def main() -> None:
     # run must not create empty output directories.
     json_path = None
     if not args.cache_only:
-        base_name = f"{model_name}_{args.decoder}"
+        base_name = f"{model_name}_{args.decoder}_seedtrain{args.seed_training}"
         args.output_dir.mkdir(parents=True, exist_ok=True)
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         json_path = args.output_dir / f"{base_name}_{timestamp}.json"
@@ -256,7 +268,7 @@ def main() -> None:
         load_segmentation_datasets(
             args.dataset,
             args.data_dir,
-            split_seed=args.seed,
+            split_seed=args.seed_data_split,
             max_patients=args.max_patients,
         )
     )
@@ -271,7 +283,7 @@ def main() -> None:
             "val": val_meta["pid"],
             "test": test_meta["pid"],
         },
-        split_seed=args.seed,
+        split_seed=args.seed_data_split,
     )
     sam_processor = config.get("sam_image_processor")
 
@@ -410,7 +422,7 @@ def main() -> None:
             "Warning: 3D volume segmentation is memory-intensive. "
             "If you encounter OOM errors, try reducing --batch-size."
         )
-    g = torch.Generator().manual_seed(args.seed)
+    g = torch.Generator().manual_seed(args.seed_training)
     train_loader = DataLoader(
         train_cached, batch_size=bs, shuffle=True, num_workers=0, generator=g
     )
@@ -418,6 +430,10 @@ def main() -> None:
     test_loader = DataLoader(test_cached, batch_size=bs, shuffle=False, num_workers=0)
 
     # ── Build decoder ──
+    # Re-seed so the decoder's initial weights depend only on --seed-training and
+    # the decoder architecture: building the backbone above consumed the global RNG
+    # (it is randomly initialised before its pretrained weights are loaded).
+    set_seed(args.seed_training)
     decoder_kwargs: dict = {}
     if args.decoder == "linear_probe":
         decoder_kwargs["dropout"] = args.dropout
@@ -543,7 +559,11 @@ def main() -> None:
             "batch_size": args.batch_size,
             "n_epochs": args.n_epochs,
             "patience": args.patience,
-            "seed": args.seed,
+            "seed_data_split": args.seed_data_split,
+            "seed_training": args.seed_training,
+            "device": str(device),
+            "torch_version": torch.__version__,
+            "deterministic_algorithms": torch.are_deterministic_algorithms_enabled(),
             "trainable_params": n_params,
         },
         "per_class_dice": test_metrics["per_class_dice"],
